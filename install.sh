@@ -20,8 +20,8 @@ if ! command -v docker &> /dev/null; then
     echo -e "${GREEN}Docker установлен${NC}"
 fi
 
-# Установка Docker Compose
-if ! command -v docker-compose &> /dev/null; then
+# Проверка наличия Docker Compose
+if ! docker compose version &> /dev/null; then
     echo -e "${RED}Docker Compose не установлен. Устанавливаем...${NC}"
     
     # Определяем архитектуру системы
@@ -44,7 +44,7 @@ if ! command -v docker-compose &> /dev/null; then
     sudo chmod +x /usr/local/bin/docker-compose
     
     # Проверяем установку
-    if docker-compose --version &> /dev/null; then
+    if docker compose version &> /dev/null; then
         echo -e "${GREEN}Docker Compose успешно установлен${NC}"
     else
         echo -e "${RED}Ошибка при установке Docker Compose${NC}"
@@ -84,14 +84,14 @@ fi
 
 # Запуск Docker контейнера
 echo -e "${YELLOW}Собираем и запускаем Docker контейнер...${NC}"
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
+docker compose down
+docker compose build --no-cache
+docker compose up -d
 
 # Проверка статуса
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}Бот успешно запущен!${NC}"
-    echo -e "${YELLOW}Просмотр логов: ${NC}docker-compose logs -f"
+    echo -e "${YELLOW}Просмотр логов: ${NC}docker compose logs -f"
 else
     echo -e "${RED}Произошла ошибка при запуске бота.${NC}"
     exit 1
