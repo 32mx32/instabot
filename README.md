@@ -113,7 +113,7 @@ python main.py
    - Запустит бота в Docker-контейнере
 
 #### Обновление бота через SSH
-Для обновления уже установленного бота используйте скрипт `update.sh`:
+Для обновления уже установленного бота используйте скрипт `deploy-ssh.sh`:
 
 1. Создайте SSH-ключ для сервера (если еще не создан):
    ```bash
@@ -127,13 +127,13 @@ python main.py
 
 3. Скачайте скрипт на ваш компьютер:
    ```bash
-   curl -O https://raw.githubusercontent.com/32mx32/instabot/main/update.sh
-   chmod +x update.sh
+   curl -O https://raw.githubusercontent.com/32mx32/instabot/main/deploy-ssh.sh
+   chmod +x deploy-ssh.sh
    ```
 
 4. Настройте скрипт:
    ```bash
-   nano update.sh
+   nano deploy-ssh.sh
    ```
    Измените следующие параметры:
    - SERVER_USER - имя пользователя на сервере
@@ -142,7 +142,7 @@ python main.py
 
 5. Запустите скрипт:
    ```bash
-   ./update.sh
+   ./deploy-ssh.sh
    ```
 
 Скрипт автоматически:
