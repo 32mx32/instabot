@@ -20,11 +20,36 @@ if ! command -v docker &> /dev/null; then
     echo -e "${GREEN}Docker установлен${NC}"
 fi
 
+# Установка Docker Compose
 if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
     echo -e "${RED}Docker Compose не установлен. Устанавливаем...${NC}"
-    sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.1/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    
+    # Определяем архитектуру системы
+    ARCH=$(uname -m)
+    if [ "$ARCH" = "x86_64" ]; then
+        ARCH="x86_64"
+    elif [ "$ARCH" = "aarch64" ]; then
+        ARCH="aarch64"
+    else
+        echo -e "${RED}Неподдерживаемая архитектура: $ARCH${NC}"
+        exit 1
+    fi
+    
+    # Устанавливаем Docker Compose
+    COMPOSE_VERSION="v2.24.1"
+    COMPOSE_URL="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${ARCH}"
+    
+    echo -e "${YELLOW}Скачиваем Docker Compose...${NC}"
+    sudo curl -L "$COMPOSE_URL" -o /usr/local/bin/docker-compose
     sudo chmod +x /usr/local/bin/docker-compose
-    echo -e "${GREEN}Docker Compose установлен${NC}"
+    
+    # Проверяем установку
+    if docker-compose --version &> /dev/null; then
+        echo -e "${GREEN}Docker Compose успешно установлен${NC}"
+    else
+        echo -e "${RED}Ошибка при установке Docker Compose${NC}"
+        exit 1
+    fi
 fi
 
 # Обновление репозитория, если он уже существует
