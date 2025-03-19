@@ -128,7 +128,7 @@ python main.py
 
 ### Развертывание на сервере через скрипт
 
-Для быстрого и удобного развертывания бота на сервере используйте скрипт deploy.sh:
+Для быстрого и удобного развертывания бота на сервере используйте скрипт deploy-ssh.sh:
 
 1. Создайте Personal Access Token на GitHub:
    - Перейдите на страницу https://github.com/settings/tokens
@@ -137,21 +137,27 @@ python main.py
 
 2. Скачайте скрипт на сервер:
    ```bash
-   curl -O https://raw.githubusercontent.com/32mx32/instabot/main/deploy.sh
-   chmod +x deploy.sh
+   curl -O https://raw.githubusercontent.com/32mx32/instabot/main/deploy-ssh.sh
+   chmod +x deploy-ssh.sh
    ```
 
-3. Запустите скрипт:
+3. Настройте скрипт:
    ```bash
-   ./deploy.sh
+   nano deploy-ssh.sh
    ```
-   При запуске скрипт запросит ваш GitHub Personal Access Token.
+   Измените следующие параметры:
+   - SERVER_USER - имя пользователя на сервере
+   - SERVER_HOST - адрес вашего сервера
+   - REPO_PATH - путь к директории проекта на сервере
+
+4. Запустите скрипт:
+   ```bash
+   ./deploy-ssh.sh
+   ```
 
 Скрипт автоматически:
-- Проверит наличие Docker и Docker Compose и установит их, если необходимо
-- Клонирует или обновит репозиторий с использованием вашего токена
-- Создаст конфигурационный файл, если его нет
-- Запустит бота в Docker-контейнере
+- Скопирует все файлы проекта на сервер
+- Перезапустит Docker-контейнеры с новыми изменениями
 
 ### Быстрое обновление бота
 
