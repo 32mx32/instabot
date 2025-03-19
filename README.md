@@ -85,7 +85,35 @@ python main.py
    docker-compose logs -f
    ```
 
-### Развертывание на сервере через SSH
+### Развертывание на сервере
+
+#### Первоначальная установка
+Для первоначальной установки бота на сервере используйте скрипт `deploy.sh`:
+
+1. Создайте Personal Access Token на GitHub:
+   - Перейдите на страницу https://github.com/settings/tokens
+   - Создайте новый токен с правами `repo` (для доступа к приватному репозиторию)
+   - Скопируйте токен (он будет показан только один раз)
+
+2. Скачайте скрипт на сервер:
+   ```bash
+   curl -O https://raw.githubusercontent.com/32mx32/instabot/main/deploy.sh
+   chmod +x deploy.sh
+   ```
+
+3. Запустите скрипт:
+   ```bash
+   ./deploy.sh
+   ```
+   При запуске скрипт:
+   - Проверит наличие Docker и Docker Compose и установит их, если необходимо
+   - Запросит ваш GitHub Personal Access Token
+   - Клонирует репозиторий
+   - Создаст и настроит файл .env
+   - Запустит бота в Docker-контейнере
+
+#### Обновление бота через SSH
+Для обновления уже установленного бота используйте скрипт `deploy-ssh.sh`:
 
 1. Создайте SSH-ключ для сервера (если еще не создан):
    ```bash
@@ -97,51 +125,13 @@ python main.py
    ssh-copy-id -i ~/.ssh/id_ed25519.pub user@your-server
    ```
 
-3. Создайте файл `deploy-ssh.sh` на вашем компьютере:
-   ```bash
-   #!/bin/bash
-   
-   # Конфигурация
-   SERVER_USER="user"
-   SERVER_HOST="your-server"
-   REPO_PATH="/path/to/repo"
-   
-   # Копируем файлы на сервер
-   rsync -avz --exclude 'venv' --exclude '__pycache__' --exclude '.git' ./ $SERVER_USER@$SERVER_HOST:$REPO_PATH/
-   
-   # Подключаемся к серверу и выполняем команды
-   ssh $SERVER_USER@$SERVER_HOST "cd $REPO_PATH && \
-       docker-compose down && \
-       docker-compose pull && \
-       docker-compose up -d"
-   ```
-
-4. Сделайте скрипт исполняемым:
-   ```bash
-   chmod +x deploy-ssh.sh
-   ```
-
-5. Запустите скрипт:
-   ```bash
-   ./deploy-ssh.sh
-   ```
-
-### Развертывание на сервере через скрипт
-
-Для быстрого и удобного развертывания бота на сервере используйте скрипт deploy-ssh.sh:
-
-1. Создайте Personal Access Token на GitHub:
-   - Перейдите на страницу https://github.com/settings/tokens
-   - Создайте новый токен с правами `repo` (для доступа к приватному репозиторию)
-   - Скопируйте токен (он будет показан только один раз)
-
-2. Скачайте скрипт на сервер:
+3. Скачайте скрипт на ваш компьютер:
    ```bash
    curl -O https://raw.githubusercontent.com/32mx32/instabot/main/deploy-ssh.sh
    chmod +x deploy-ssh.sh
    ```
 
-3. Настройте скрипт:
+4. Настройте скрипт:
    ```bash
    nano deploy-ssh.sh
    ```
@@ -150,7 +140,7 @@ python main.py
    - SERVER_HOST - адрес вашего сервера
    - REPO_PATH - путь к директории проекта на сервере
 
-4. Запустите скрипт:
+5. Запустите скрипт:
    ```bash
    ./deploy-ssh.sh
    ```
