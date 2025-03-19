@@ -85,6 +85,47 @@ python main.py
    docker-compose logs -f
    ```
 
+### Развертывание на сервере через SSH
+
+1. Создайте SSH-ключ для сервера (если еще не создан):
+   ```bash
+   ssh-keygen -t ed25519 -C "server@example.com"
+   ```
+
+2. Добавьте публичный ключ на сервер:
+   ```bash
+   ssh-copy-id -i ~/.ssh/id_ed25519.pub user@your-server
+   ```
+
+3. Создайте файл `deploy-ssh.sh` на вашем компьютере:
+   ```bash
+   #!/bin/bash
+   
+   # Конфигурация
+   SERVER_USER="user"
+   SERVER_HOST="your-server"
+   REPO_PATH="/path/to/repo"
+   
+   # Копируем файлы на сервер
+   rsync -avz --exclude 'venv' --exclude '__pycache__' --exclude '.git' ./ $SERVER_USER@$SERVER_HOST:$REPO_PATH/
+   
+   # Подключаемся к серверу и выполняем команды
+   ssh $SERVER_USER@$SERVER_HOST "cd $REPO_PATH && \
+       docker-compose down && \
+       docker-compose pull && \
+       docker-compose up -d"
+   ```
+
+4. Сделайте скрипт исполняемым:
+   ```bash
+   chmod +x deploy-ssh.sh
+   ```
+
+5. Запустите скрипт:
+   ```bash
+   ./deploy-ssh.sh
+   ```
+
 ### Развертывание на сервере через скрипт
 
 Для быстрого и удобного развертывания бота на сервере используйте скрипт deploy.sh:
