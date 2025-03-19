@@ -18,6 +18,43 @@
     pip install -r requirements.txt
     ```
 
+## Настройка GitHub через SSH
+
+1. Сгенерируйте SSH-ключ (если еще не создан):
+```bash
+ssh-keygen -t ed25519 -C "ваш_email@example.com"
+```
+
+2. Добавьте SSH-ключ в ssh-agent:
+```bash
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519
+```
+
+3. Скопируйте публичный ключ:
+```bash
+# Для Mac
+pbcopy < ~/.ssh/id_ed25519.pub
+# Для Linux
+cat ~/.ssh/id_ed25519.pub | xclip -selection clipboard
+```
+
+4. Добавьте ключ в GitHub:
+   - Перейдите в Settings -> SSH and GPG keys
+   - Нажмите "New SSH key"
+   - Вставьте скопированный ключ
+   - Сохраните
+
+5. Измените URL репозитория на SSH:
+```bash
+git remote set-url origin git@github.com:32mx32/instabot.git
+```
+
+6. Проверьте подключение:
+```bash
+ssh -T git@github.com
+```
+
 ## Конфигурация
 Откройте файл config.py и замените значения переменных:
 
