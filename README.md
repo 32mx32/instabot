@@ -95,14 +95,10 @@ python main.py
    - Создайте новый токен с правами `repo` (для доступа к приватному репозиторию)
    - Скопируйте токен (он будет показан только один раз)
 
-2. Скачайте скрипт на сервер (выберите один из способов):
+2. Скачайте скрипт на сервер:
    ```bash
-   # Способ 1 (через raw.githubusercontent.com)
-   curl -O https://raw.githubusercontent.com/32mx32/instabot/main/install.sh
-   
-   # Способ 2 (через github.com)
-   curl -O https://github.com/32mx32/instabot/raw/main/install.sh
-   
+   # Скачиваем скрипт
+   curl -H "Accept: application/vnd.github.raw" -O https://api.github.com/repos/32mx32/instabot/contents/install.sh
    chmod +x install.sh
    ```
 
@@ -130,14 +126,10 @@ python main.py
    ssh-copy-id -i ~/.ssh/id_ed25519.pub user@your-server
    ```
 
-3. Скачайте скрипт на ваш компьютер (выберите один из способов):
+3. Скачайте скрипт на ваш компьютер:
    ```bash
-   # Способ 1 (через raw.githubusercontent.com)
-   curl -O https://raw.githubusercontent.com/32mx32/instabot/main/update.sh
-   
-   # Способ 2 (через github.com)
-   curl -O https://github.com/32mx32/instabot/raw/main/update.sh
-   
+   # Скачиваем скрипт
+   curl -H "Accept: application/vnd.github.raw" -O https://api.github.com/repos/32mx32/instabot/contents/update.sh
    chmod +x update.sh
    ```
 
@@ -164,12 +156,8 @@ python main.py
 Если вы уже настроили бота и хотите обновить его до последней версии:
 
 ```bash
-# Способ 1 (через raw.githubusercontent.com)
-curl -O https://raw.githubusercontent.com/32mx32/instabot/main/quick-update.sh
-
-# Способ 2 (через github.com)
-curl -O https://github.com/32mx32/instabot/raw/main/quick-update.sh
-
+# Скачиваем скрипт
+curl -H "Accept: application/vnd.github.raw" -O https://api.github.com/repos/32mx32/instabot/contents/quick-update.sh
 chmod +x quick-update.sh
 ./quick-update.sh
 ```
