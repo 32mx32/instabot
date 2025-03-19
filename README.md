@@ -97,8 +97,12 @@ python main.py
 
 2. Скачайте скрипт на сервер:
    ```bash
-   # Скачиваем скрипт
-   curl -O https://github.com/32mx32/instabot/raw/main/install.sh
+   # Клонируем репозиторий
+   git clone https://github.com/32mx32/instabot.git temp
+   # Копируем нужный скрипт
+   cp temp/install.sh .
+   # Удаляем временную директорию
+   rm -rf temp
    chmod +x install.sh
    ```
 
@@ -128,8 +132,12 @@ python main.py
 
 3. Скачайте скрипт на ваш компьютер:
    ```bash
-   # Скачиваем скрипт
-   curl -O https://github.com/32mx32/instabot/raw/main/update.sh
+   # Клонируем репозиторий
+   git clone https://github.com/32mx32/instabot.git temp
+   # Копируем нужный скрипт
+   cp temp/update.sh .
+   # Удаляем временную директорию
+   rm -rf temp
    chmod +x update.sh
    ```
 
@@ -156,8 +164,12 @@ python main.py
 Если вы уже настроили бота и хотите обновить его до последней версии:
 
 ```bash
-# Скачиваем скрипт
-curl -O https://github.com/32mx32/instabot/raw/main/quick-update.sh
+# Клонируем репозиторий
+git clone https://github.com/32mx32/instabot.git temp
+# Копируем нужный скрипт
+cp temp/quick-update.sh .
+# Удаляем временную директорию
+rm -rf temp
 chmod +x quick-update.sh
 ./quick-update.sh
 ```
