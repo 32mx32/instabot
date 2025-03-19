@@ -98,7 +98,7 @@ python main.py
 2. Скачайте скрипт на сервер:
    ```bash
    # Скачиваем скрипт
-   curl -H "Accept: application/vnd.github.raw" -O https://api.github.com/repos/32mx32/instabot/contents/install.sh
+   curl -O https://github.com/32mx32/instabot/raw/main/install.sh
    chmod +x install.sh
    ```
 
@@ -129,7 +129,7 @@ python main.py
 3. Скачайте скрипт на ваш компьютер:
    ```bash
    # Скачиваем скрипт
-   curl -H "Accept: application/vnd.github.raw" -O https://api.github.com/repos/32mx32/instabot/contents/update.sh
+   curl -O https://github.com/32mx32/instabot/raw/main/update.sh
    chmod +x update.sh
    ```
 
@@ -157,7 +157,7 @@ python main.py
 
 ```bash
 # Скачиваем скрипт
-curl -H "Accept: application/vnd.github.raw" -O https://api.github.com/repos/32mx32/instabot/contents/quick-update.sh
+curl -O https://github.com/32mx32/instabot/raw/main/quick-update.sh
 chmod +x quick-update.sh
 ./quick-update.sh
 ```
