@@ -88,7 +88,7 @@ python main.py
 ### Развертывание на сервере
 
 #### Первоначальная установка
-Для первоначальной установки бота на сервере используйте скрипт `deploy.sh`:
+Для первоначальной установки бота на сервере используйте скрипт `install.sh`:
 
 1. Создайте Personal Access Token на GitHub:
    - Перейдите на страницу https://github.com/settings/tokens
@@ -97,13 +97,13 @@ python main.py
 
 2. Скачайте скрипт на сервер:
    ```bash
-   curl -O https://raw.githubusercontent.com/32mx32/instabot/main/deploy.sh
-   chmod +x deploy.sh
+   curl -O https://raw.githubusercontent.com/32mx32/instabot/main/install.sh
+   chmod +x install.sh
    ```
 
 3. Запустите скрипт:
    ```bash
-   ./deploy.sh
+   ./install.sh
    ```
    При запуске скрипт:
    - Проверит наличие Docker и Docker Compose и установит их, если необходимо
@@ -113,7 +113,7 @@ python main.py
    - Запустит бота в Docker-контейнере
 
 #### Обновление бота через SSH
-Для обновления уже установленного бота используйте скрипт `deploy-ssh.sh`:
+Для обновления уже установленного бота используйте скрипт `update.sh`:
 
 1. Создайте SSH-ключ для сервера (если еще не создан):
    ```bash
@@ -127,13 +127,13 @@ python main.py
 
 3. Скачайте скрипт на ваш компьютер:
    ```bash
-   curl -O https://raw.githubusercontent.com/32mx32/instabot/main/deploy-ssh.sh
-   chmod +x deploy-ssh.sh
+   curl -O https://raw.githubusercontent.com/32mx32/instabot/main/update.sh
+   chmod +x update.sh
    ```
 
 4. Настройте скрипт:
    ```bash
-   nano deploy-ssh.sh
+   nano update.sh
    ```
    Измените следующие параметры:
    - SERVER_USER - имя пользователя на сервере
@@ -142,7 +142,7 @@ python main.py
 
 5. Запустите скрипт:
    ```bash
-   ./deploy-ssh.sh
+   ./update.sh
    ```
 
 Скрипт автоматически:
@@ -154,7 +154,7 @@ python main.py
 Если вы уже настроили бота и хотите обновить его до последней версии:
 
 ```bash
-./quick-deploy.sh
+./quick-update.sh
 ```
 
 При запуске скрипт может запросить ваш GitHub Personal Access Token.
