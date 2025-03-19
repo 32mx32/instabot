@@ -27,23 +27,14 @@ if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/
     echo -e "${GREEN}Docker Compose установлен${NC}"
 fi
 
-# Проверка наличия токена доступа для приватного репозитория
-if [ -z "$GITHUB_TOKEN" ]; then
-    echo -e "${YELLOW}Для доступа к приватному репозиторию требуется токен GitHub.${NC}"
-    echo -e "${YELLOW}Создайте Personal Access Token на странице https://github.com/settings/tokens${NC}"
-    read -p "Введите ваш GitHub Personal Access Token: " GITHUB_TOKEN
-    echo
-fi
-
 # Обновление репозитория, если он уже существует
 if [ -d "instabot" ]; then
     echo -e "${YELLOW}Репозиторий найден, обновляем...${NC}"
     cd instabot
-    git pull https://$GITHUB_TOKEN@github.com/32mx32/instabot.git
+    git pull
 else
     echo -e "${YELLOW}Клонируем репозиторий...${NC}"
-    # Используем приватный репозиторий с токеном для авторизации
-    git clone https://$GITHUB_TOKEN@github.com/32mx32/instabot.git instabot
+    git clone https://github.com/32mx32/instabot.git instabot
     cd instabot
 fi
 
