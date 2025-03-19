@@ -1,0 +1,11 @@
+services:
+  instabot:
+    build: .
+    image: instabot:latest
+    restart: always
+    volumes:
+      - ./instagram_downloads:/app/instagram_downloads
+    environment:
+      - TZ=Europe/Moscow
+    env_file:
+      - .env 

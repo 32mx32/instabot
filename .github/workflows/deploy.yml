@@ -1,0 +1,42 @@
+name: Deploy to server
+
+on:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Создаем временный файл для хранения токена
+            echo "${{ secrets.GITHUB_TOKEN }}" > /tmp/github_token
+            export GITHUB_TOKEN=$(cat /tmp/github_token)
+            
+            # Проверяем, существует ли директория
+            if [ -d "/path/to/instabot" ]; then
+              cd /path/to/instabot
+              git pull https://$GITHUB_TOKEN@github.com/32mx32/instabot.git
+            else
+              git clone https://$GITHUB_TOKEN@github.com/32mx32/instabot.git /path/to/instabot
+              cd /path/to/instabot
+            fi
+            
+            # Удаляем временный файл с токеном
+            rm /tmp/github_token
+            
+            # Перезапускаем контейнер
+            docker-compose down
+            docker-compose build --no-cache
+            docker-compose up -d 
