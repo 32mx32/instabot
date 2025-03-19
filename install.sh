@@ -21,7 +21,7 @@ if ! command -v docker &> /dev/null; then
 fi
 
 # Установка Docker Compose
-if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+if ! command -v docker-compose &> /dev/null; then
     echo -e "${RED}Docker Compose не установлен. Устанавливаем...${NC}"
     
     # Определяем архитектуру системы
