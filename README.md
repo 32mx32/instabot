@@ -4,10 +4,9 @@
 
 ## Установка локально
 
-1. Клонируйте репозиторий или скачайте код на ваш компьютер.
+1. Клонируйте репозиторий:
    ```bash
-   # Для приватного репозитория требуется токен доступа
-   git clone https://{GITHUB_TOKEN}@github.com/32mx32/instabot.git
+   git clone https://github.com/32mx32/instabot.git
    cd instabot
    ```
 
@@ -90,24 +89,18 @@ python main.py
 #### Первоначальная установка
 Для первоначальной установки бота на сервере используйте скрипт `install.sh`:
 
-1. Создайте Personal Access Token на GitHub:
-   - Перейдите на страницу https://github.com/settings/tokens
-   - Создайте новый токен с правами `repo` (для доступа к приватному репозиторию)
-   - Скопируйте токен (он будет показан только один раз)
-
-2. Скачайте скрипт на сервер:
+1. Скачайте скрипт на сервер:
    ```bash
    curl -O https://raw.githubusercontent.com/32mx32/instabot/main/install.sh
    chmod +x install.sh
    ```
 
-3. Запустите скрипт:
+2. Запустите скрипт:
    ```bash
    ./install.sh
    ```
    При запуске скрипт:
    - Проверит наличие Docker и Docker Compose и установит их, если необходимо
-   - Запросит ваш GitHub Personal Access Token
    - Клонирует репозиторий
    - Создаст и настроит файл .env
    - Запустит бота в Docker-контейнере
@@ -157,16 +150,13 @@ python main.py
 ./quick-update.sh
 ```
 
-При запуске скрипт может запросить ваш GitHub Personal Access Token.
-
 ### Развертывание на сервере через ручную установку
 
-1. Клонируйте приватный репозиторий на сервер:
+1. Клонируйте репозиторий на сервер:
    ```bash
-   git clone https://{GITHUB_TOKEN}@github.com/32mx32/instabot.git
+   git clone https://github.com/32mx32/instabot.git
    cd instabot
    ```
-   Замените {GITHUB_TOKEN} на ваш Personal Access Token.
 
 2. Настройте файл config.py с корректными данными:
    ```bash
@@ -189,7 +179,6 @@ python main.py
    - SSH_PRIVATE_KEY
    - SSH_HOST
    - SSH_USER
-   - GITHUB_TOKEN (для доступа к приватному репозиторию)
 
 ## Использование
 После запуска бота отправьте команду /start, а затем отправьте ссылку на пост в Instagram, чтобы скачать его контент.
