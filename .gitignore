@@ -25,4 +25,4 @@ instagram_downloads/*
 Thumbs.db
 
 # Логи
-*.log 
+*.log .env

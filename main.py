@@ -3,6 +3,7 @@ import requests
 import re
 import uuid
 import json
+import time
 from urllib.parse import urlparse
 from apify_client import ApifyClient
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -26,12 +27,25 @@ INSTAGRAM_REEL_REGEX = re.compile(
 # Регулярное выражение для обнаружения ключа комментария
 COMMENT_KEY_REGEX = re.compile(r'(/w|/W)\b', re.IGNORECASE)
 
-# Словарь для хранения комментариев по ID сообщения
+# Словарь для хранения комментариев по ID сообщения с ограничением размера
 COMMENTS_CACHE = {}
+MAX_CACHE_SIZE = 1000  # Максимальное количество комментариев в кэше
 
 # Префикс для callback данных
 SHOW_COMMENT_PREFIX = "show_comment:"
 HIDE_COMMENT_PREFIX = "hide_comment:"
+
+
+def clean_comments_cache():
+    """Очищает кэш комментариев, если он превышает максимальный размер"""
+    global COMMENTS_CACHE
+    if len(COMMENTS_CACHE) > MAX_CACHE_SIZE:
+        # Удаляем половину самых старых записей
+        items_to_remove = len(COMMENTS_CACHE) - MAX_CACHE_SIZE // 2
+        keys_to_remove = list(COMMENTS_CACHE.keys())[:items_to_remove]
+        for key in keys_to_remove:
+            del COMMENTS_CACHE[key]
+        logger.info(f"Очищен кэш комментариев: удалено {items_to_remove} записей")
 
 
 def is_exact_reel_url(text):
@@ -63,7 +77,7 @@ def clean_url(text):
 
 
 # Функция для скачивания файла по URL
-def download_file(url, folder="instagram_downloads"):
+def download_file(url, folder="instagram_downloads", timeout=30):
     try:
         # Парсим URL для получения чистого имени файла
         parsed_url = urlparse(url)
@@ -72,8 +86,14 @@ def download_file(url, folder="instagram_downloads"):
         
         # Если имя файла пустое или не содержит расширения, добавляем случайное имя
         if not filename or '.' not in filename:
-            import uuid
-            extension = '.mp4' if 'video' in requests.head(url).headers.get('Content-Type', '') else '.jpg'
+            try:
+                # Проверяем тип контента с таймаутом
+                head_response = requests.head(url, timeout=timeout)
+                content_type = head_response.headers.get('Content-Type', '')
+                extension = '.mp4' if 'video' in content_type else '.jpg'
+            except requests.RequestException as e:
+                logger.warning(f"Не удалось определить тип контента: {e}, используем .mp4 по умолчанию")
+                extension = '.mp4'
             filename = f"{uuid.uuid4().hex}{extension}"
 
         # Создаём папку для сохранения медиа, если её нет
@@ -82,8 +102,8 @@ def download_file(url, folder="instagram_downloads"):
 
         file_path = os.path.join(folder, filename)
 
-        # Отправляем GET-запрос к URL
-        response = requests.get(url, stream=True)
+        # Отправляем GET-запрос к URL с таймаутом
+        response = requests.get(url, stream=True, timeout=timeout)
 
         # Проверка статуса ответа
         if response.status_code == 200:
@@ -116,13 +136,34 @@ def download_file(url, folder="instagram_downloads"):
             logger.error(f"Ошибка при скачивании файла. Код статуса: {response.status_code}")
             return None, None
 
+    except requests.exceptions.Timeout:
+        logger.error(f"Таймаут при скачивании файла: {url}")
+        return None, None
+    except requests.exceptions.ConnectionError:
+        logger.error(f"Ошибка соединения при скачивании файла: {url}")
+        return None, None
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Ошибка HTTP запроса при скачивании файла: {e}")
+        return None, None
     except Exception as e:
-        logger.error(f"Произошла ошибка при скачивании файла: {e}")
+        logger.error(f"Неожиданная ошибка при скачивании файла: {e}")
         return None, None
 
 
+def retry_apify_request(func, max_retries=3, delay=2):
+    """Retry механизм для Apify запросов"""
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise e
+            logger.warning(f"Попытка {attempt + 1} не удалась: {e}. Повторяем через {delay} секунд...")
+            time.sleep(delay)
+            delay *= 2  # Экспоненциальная задержка
+
 # Функция для скачивания Reels через Apify
-def download_instagram_reel(post_url):
+def download_instagram_reel(post_url, timeout=60):
     try:
         # Инициализация клиента Apify
         client = ApifyClient(APIFY_API_KEY)
@@ -135,10 +176,14 @@ def download_instagram_reel(post_url):
         # Попытка 1: Используем easyapi/instagram-reels-downloader
         try:
             logger.info(f"Пытаемся скачать с помощью easyapi/instagram-reels-downloader: {post_url}")
-            run_input = {
-                "reelUrls": [post_url],
-            }
-            run = client.actor("easyapi/instagram-reels-downloader").call(run_input=run_input)
+            
+            def run_easyapi():
+                run_input = {
+                    "reelUrls": [post_url],
+                }
+                return client.actor("easyapi/instagram-reels-downloader").call(run_input=run_input)
+            
+            run = retry_apify_request(run_easyapi)
             
             # Получаем результаты
             dataset_items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
@@ -168,12 +213,16 @@ def download_instagram_reel(post_url):
         # Попытка 2: Используем apify/instagram-reel-scraper
         try:
             logger.info(f"Пытаемся скачать с помощью apify/instagram-reel-scraper: {post_url}")
-            run_input = {
-                "usernames": [],
-                "urls": [post_url],
-                "resultsLimit": 1
-            }
-            run = client.actor("apify/instagram-reel-scraper").call(run_input=run_input)
+            
+            def run_apify_scraper():
+                run_input = {
+                    "usernames": [],
+                    "urls": [post_url],
+                    "resultsLimit": 1
+                }
+                return client.actor("apify/instagram-reel-scraper").call(run_input=run_input)
+            
+            run = retry_apify_request(run_apify_scraper)
             
             # Получаем результаты
             dataset_items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
@@ -219,10 +268,14 @@ def download_instagram_reel(post_url):
         # Попытка 3: Используем старый метод (presetshubham/instagram-reel-downloader)
         try:
             logger.info(f"Пытаемся скачать с помощью оригинального метода: {post_url}")
-            run_input = {
-                "reelLinks": [post_url],
-            }
-            run = client.actor("presetshubham/instagram-reel-downloader").call(run_input=run_input)
+            
+            def run_original_method():
+                run_input = {
+                    "reelLinks": [post_url],
+                }
+                return client.actor("presetshubham/instagram-reel-downloader").call(run_input=run_input)
+            
+            run = retry_apify_request(run_original_method)
             
             # Получаем результаты
             dataset_items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
@@ -351,6 +404,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Создаем inline-клавиатуру если есть комментарий
                 keyboard = None
                 if caption_text:
+                    # Очищаем кэш при необходимости
+                    clean_comments_cache()
+                    
                     # Генерируем уникальный ID для комментария
                     comment_id = str(uuid.uuid4())
                     # Сохраняем комментарий в кэш
@@ -359,7 +415,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     keyboard = InlineKeyboardMarkup([
                         [InlineKeyboardButton("Показать комментарий", callback_data=f"{SHOW_COMMENT_PREFIX}{comment_id}")]
                     ])
-                    logger.info(f"Сохранен комментарий с ID {comment_id}: {caption_text}")
+                    logger.info(f"Сохранен комментарий с ID {comment_id}: {caption_text[:50]}...")
 
                 # Извлекаем message_thread_id из входящего сообщения
                 message_thread_id = update.message.message_thread_id if hasattr(update.message, 'message_thread_id') else None
