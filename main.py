@@ -747,12 +747,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     with open(file_path, "rb") as video_file:
                         await context.bot.send_video(
                             video=video_file,
+                            read_timeout=120,
+                            write_timeout=120,
                             **kwargs
                         )
                 elif file_type == "photo":
                     with open(file_path, "rb") as photo_file:
                         await context.bot.send_photo(
                             photo=photo_file,
+                            read_timeout=120,
+                            write_timeout=120,
                             **kwargs
                         )
                 else:
@@ -778,8 +782,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.error("Файл не был найден. Возможно, произошла ошибка при скачивании.")
                 await query.edit_message_text("⚠️ Файл не был найден. Возможно, пост недоступен или был удален.")
             except Exception as e:
+                error_text = str(e).lower()
                 logger.error(f"Произошла ошибка при отправке файла: {e}")
-                await query.edit_message_text(f"⚠️ Произошла ошибка при отправке файла: {e}")
+                
+                # Получаем размер файла для информации
+                file_size_mb = 0
+                if os.path.exists(file_path):
+                    file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                
+                if 'timed out' in error_text or 'timeout' in error_text:
+                    await query.edit_message_text(
+                        f"⏱️ **Превышено время отправки файла**\n\n"
+                        f"Размер файла: {file_size_mb:.1f} MB\n\n"
+                        f"Возможные причины:\n"
+                        f"• Файл слишком большой (лимит Telegram: 50MB)\n"
+                        f"• Медленное интернет-соединение\n"
+                        f"• Временные проблемы с Telegram API\n\n"
+                        f"💡 Попробуйте снова через кнопку '🔄 Повторить'",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await query.edit_message_text(f"⚠️ Произошла ошибка при отправке файла: {e}")
         else:
             # Если снова не удалось скачать - обновляем сообщение с кнопкой
             logger.error("Не удалось скачать Reels после повторной попытки.")
@@ -894,12 +917,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     with open(file_path, "rb") as video_file:
                         await context.bot.send_video(
                             video=video_file,
+                            read_timeout=120,
+                            write_timeout=120,
                             **kwargs
                         )
                 elif file_type == "photo":
                     with open(file_path, "rb") as photo_file:
                         await context.bot.send_photo(
                             photo=photo_file,
+                            read_timeout=120,
+                            write_timeout=120,
                             **kwargs
                         )
                 else:
@@ -930,8 +957,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.error("Файл не был найден. Возможно, произошла ошибка при скачивании.")
                 await update.message.reply_text("⚠️ Файл не был найден. Возможно, пост недоступен или был удален.")
             except Exception as e:
+                error_text = str(e).lower()
                 logger.error(f"Произошла ошибка при отправке файла: {e}")
-                await update.message.reply_text(f"⚠️ Произошла ошибка при отправке файла: {e}")
+                
+                # Получаем размер файла для информации
+                file_size_mb = 0
+                if os.path.exists(file_path):
+                    file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                
+                if 'timed out' in error_text or 'timeout' in error_text:
+                    await update.message.reply_text(
+                        f"⏱️ **Превышено время отправки файла**\n\n"
+                        f"Размер файла: {file_size_mb:.1f} MB\n\n"
+                        f"Возможные причины:\n"
+                        f"• Файл слишком большой (лимит Telegram: 50MB)\n"
+                        f"• Медленное интернет-соединение\n"
+                        f"• Временные проблемы с Telegram API\n\n"
+                        f"💡 Попробуйте снова через кнопку '🔄 Повторить'",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await update.message.reply_text(f"⚠️ Произошла ошибка при отправке файла: {e}")
         else:
             # Обновляем статистику - неудача
             stats['failed_downloads'] += 1
