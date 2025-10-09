@@ -6,12 +6,13 @@ import json
 import time
 from urllib.parse import urlparse
 from apify_client import ApifyClient
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from config import TELEGRAM_BOT_TOKEN, APIFY_API_KEY, DELETE_AFTER_SEND
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
+from typing import Optional, Tuple, List, Dict, Set, Any
 
 # Настройка логирования
 logging.basicConfig(
@@ -51,12 +52,17 @@ user_requests = defaultdict(list)
 MAX_REQUESTS_PER_MINUTE = 5
 
 # Статистика
-stats = {
+stats: Dict[str, Any] = {
     'total_downloads': 0,
     'successful_downloads': 0,
     'failed_downloads': 0,
     'users': set()
 }
+
+# Кэш скачанных файлов (URL -> (file_path, timestamp))
+file_cache: Dict[str, Tuple[str, float]] = {}
+CACHE_TTL = 3600  # 1 час
+MAX_FILE_CACHE_SIZE = 50  # Максимум файлов в кэше
 
 # Префикс для callback данных
 SHOW_COMMENT_PREFIX = "show_comment:"
@@ -64,7 +70,7 @@ HIDE_COMMENT_PREFIX = "hide_comment:"
 RETRY_DOWNLOAD_PREFIX = "retry:"
 
 
-def clean_comments_cache():
+def clean_comments_cache() -> None:
     """Очищает кэш комментариев, если он превышает максимальный размер"""
     global COMMENTS_CACHE
     if len(COMMENTS_CACHE) > MAX_CACHE_SIZE:
@@ -76,7 +82,7 @@ def clean_comments_cache():
         logger.info(f"Очищен кэш комментариев: удалено {items_to_remove} записей")
 
 
-def clean_retry_url_cache():
+def clean_retry_url_cache() -> None:
     """Очищает кэш URL для повторных попыток, если он превышает максимальный размер"""
     global RETRY_URL_CACHE
     if len(RETRY_URL_CACHE) > MAX_CACHE_SIZE:
@@ -88,7 +94,83 @@ def clean_retry_url_cache():
         logger.info(f"Очищен кэш URL: удалено {items_to_remove} записей")
 
 
-def check_rate_limit(user_id):
+def clean_file_cache() -> None:
+    """Очищает кэш файлов, удаляя старые и превышающие лимит"""
+    global file_cache
+    current_time = time.time()
+    
+    # Удаляем устаревшие файлы
+    expired_urls = [
+        url for url, (_, timestamp) in file_cache.items()
+        if current_time - timestamp > CACHE_TTL
+    ]
+    
+    for url in expired_urls:
+        file_path, _ = file_cache[url]
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.info(f"Удален устаревший файл из кэша: {file_path}")
+            except Exception as e:
+                logger.warning(f"Не удалось удалить файл {file_path}: {e}")
+        del file_cache[url]
+    
+    # Если кэш все еще слишком большой, удаляем самые старые
+    if len(file_cache) > MAX_FILE_CACHE_SIZE:
+        sorted_cache = sorted(file_cache.items(), key=lambda x: x[1][1])
+        items_to_remove = len(file_cache) - MAX_FILE_CACHE_SIZE
+        
+        for url, (file_path, _) in sorted_cache[:items_to_remove]:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить файл {file_path}: {e}")
+            del file_cache[url]
+        
+        logger.info(f"Очищен кэш файлов: удалено {items_to_remove} записей")
+
+
+def get_cached_file(url: str) -> Optional[str]:
+    """Получает файл из кэша, если он существует и не устарел"""
+    if url not in file_cache:
+        return None
+    
+    file_path, timestamp = file_cache[url]
+    current_time = time.time()
+    
+    # Проверяем, не устарел ли файл
+    if current_time - timestamp > CACHE_TTL:
+        # Удаляем устаревший файл
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                logger.warning(f"Не удалось удалить устаревший файл: {e}")
+        del file_cache[url]
+        return None
+    
+    # Проверяем, существует ли файл
+    if not os.path.exists(file_path):
+        del file_cache[url]
+        return None
+    
+    logger.info(f"Файл найден в кэше: {url}")
+    return file_path
+
+
+def add_to_file_cache(url: str, file_path: str) -> None:
+    """Добавляет файл в кэш"""
+    global file_cache
+    file_cache[url] = (file_path, time.time())
+    logger.info(f"Файл добавлен в кэш: {url}")
+    
+    # Очищаем кэш при необходимости
+    if len(file_cache) > MAX_FILE_CACHE_SIZE:
+        clean_file_cache()
+
+
+def check_rate_limit(user_id: int) -> bool:
     """Проверяет rate limit для пользователя"""
     now = datetime.now()
     # Удаляем запросы старше 1 минуты
@@ -104,12 +186,72 @@ def check_rate_limit(user_id):
     return True
 
 
-def is_exact_reel_url(text):
+def get_error_details(error: Exception) -> str:
+    """Анализирует ошибку и возвращает детальное описание"""
+    error_msg = str(error).lower()
+    
+    if 'timeout' in error_msg or 'timed out' in error_msg:
+        return (
+            "⏱️ **Превышено время ожидания**\n\n"
+            "Сервер слишком долго отвечал. Возможные причины:\n"
+            "• Перегрузка Instagram API\n"
+            "• Медленное интернет-соединение\n"
+            "• Временные проблемы с Apify\n\n"
+            "💡 Попробуйте повторить через минуту."
+        )
+    elif 'connection' in error_msg or 'network' in error_msg:
+        return (
+            "🌐 **Ошибка подключения**\n\n"
+            "Не удалось установить соединение:\n"
+            "• Проблемы с интернетом\n"
+            "• Блокировка со стороны провайдера\n"
+            "• Недоступность сервиса\n\n"
+            "💡 Проверьте интернет-соединение."
+        )
+    elif '401' in error_msg or 'unauthorized' in error_msg:
+        return (
+            "🔒 **Ошибка авторизации**\n\n"
+            "Instagram заблокировал доступ:\n"
+            "• Возможно, аккаунт приватный\n"
+            "• Временная блокировка IP\n"
+            "• Пост удален владельцем\n\n"
+            "💡 Подождите 5-10 минут и попробуйте снова."
+        )
+    elif '404' in error_msg or 'not found' in error_msg:
+        return (
+            "❌ **Контент не найден**\n\n"
+            "Пост недоступен:\n"
+            "• Пост был удален\n"
+            "• Неверная ссылка\n"
+            "• Аккаунт заблокирован\n\n"
+            "💡 Проверьте ссылку в Instagram."
+        )
+    elif '429' in error_msg or 'rate limit' in error_msg or 'too many' in error_msg:
+        return (
+            "🚫 **Слишком много запросов**\n\n"
+            "Instagram ограничил доступ:\n"
+            "• Превышен лимит запросов\n"
+            "• Временная блокировка\n\n"
+            "💡 Подождите 10-15 минут перед повтором."
+        )
+    else:
+        return (
+            "⚠️ **Неизвестная ошибка**\n\n"
+            f"Детали: {error}\n\n"
+            "Общие причины:\n"
+            "• Пост недоступен или удален\n"
+            "• Аккаунт приватный\n"
+            "• Проблемы с API\n\n"
+            "💡 Попробуйте кнопку '🔄 Повторить' или проверьте ссылку."
+        )
+
+
+def is_exact_reel_url(text: str) -> bool:
     """Проверяет, является ли текст точной ссылкой на Reels."""
     return bool(INSTAGRAM_REEL_REGEX.match(text))
 
 
-def should_include_comment(text):
+def should_include_comment(text: Optional[str]) -> bool:
     """Проверяет, содержит ли текст ключ для включения комментария."""
     if text is None:
         return False
@@ -117,7 +259,7 @@ def should_include_comment(text):
 
 
 # Функция для очистки URL от ключей
-def clean_url(text):
+def clean_url(text: str) -> Optional[str]:
     """Извлекает чистый URL Instagram из текста (Reels или обычные посты)."""
     # Сначала проверяем Reels
     match = INSTAGRAM_REEL_REGEX.search(text)
@@ -138,7 +280,7 @@ def clean_url(text):
 
 
 # Функция для скачивания файла по URL
-def download_file(url, folder="instagram_downloads", timeout=30):
+def download_file(url: str, folder: str = "instagram_downloads", timeout: int = 30) -> Tuple[Optional[str], Optional[str]]:
     try:
         # Парсим URL для получения чистого имени файла
         parsed_url = urlparse(url)
@@ -224,8 +366,26 @@ def retry_apify_request(func, max_retries=3, delay=2):
             delay *= 2  # Экспоненциальная задержка
 
 
-async def download_reel_with_retry(post_url, max_attempts=3, status_message=None):
-    """Скачивание Reels с несколькими попытками и индикатором прогресса"""
+async def download_reel_with_retry(post_url: str, max_attempts: int = 3, status_message: Optional[Message] = None) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Скачивание Reels с несколькими попытками, индикатором прогресса и кэшированием"""
+    
+    # Проверяем кэш перед скачиванием
+    cached_file = get_cached_file(post_url)
+    if cached_file:
+        logger.info(f"Используем файл из кэша для {post_url}")
+        if status_message:
+            try:
+                await status_message.edit_text("✅ Файл найден в кэше!")
+            except Exception as e:
+                logger.warning(f"Не удалось обновить статус: {e}")
+        
+        # Определяем тип файла
+        file_extension = os.path.splitext(cached_file)[1].lower()
+        file_type = 'video' if file_extension in ['.mp4', '.mov', '.avi'] else 'photo'
+        
+        return cached_file, file_type, None
+    
+    # Если файла нет в кэше, скачиваем
     for attempt in range(1, max_attempts + 1):
         logger.info(f"Попытка скачивания {attempt}/{max_attempts}: {post_url}")
         
@@ -239,6 +399,8 @@ async def download_reel_with_retry(post_url, max_attempts=3, status_message=None
         
         file_path, file_type, caption = download_instagram_reel(post_url)
         if file_path:
+            # Добавляем файл в кэш
+            add_to_file_cache(post_url, file_path)
             return file_path, file_type, caption
         if attempt < max_attempts:
             logger.warning(f"Попытка {attempt} не удалась, ожидаем 3 секунды перед повтором...")
