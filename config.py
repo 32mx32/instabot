@@ -26,16 +26,12 @@ else:
 # Токен вашего Telegram-бота
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TELEGRAM_BOT_TOKEN:
-    logger.warning("TELEGRAM_BOT_TOKEN не задан в .env файле или переменных окружения")
-    # Используем значение по умолчанию из старого config.py, если оно есть
-    TELEGRAM_BOT_TOKEN = "7840804415:AAGBxPhyLsGygM4v45zbLfUhn8taepr9jTA"
+    raise ValueError("TELEGRAM_BOT_TOKEN не задан в .env файле или переменных окружения")
 
 # API ключ Apify
 APIFY_API_KEY = os.getenv("APIFY_API_KEY")
 if not APIFY_API_KEY:
-    logger.warning("APIFY_API_KEY не задан в .env файле или переменных окружения")
-    # Используем значение по умолчанию из старого config.py, если оно есть
-    APIFY_API_KEY = "apify_api_5WlXeeguNJQjbceVUeHRYydhQGYXm040PDqv"
+    raise ValueError("APIFY_API_KEY не задан в .env файле или переменных окружения")
 
 # Удалять файлы после отправки
 DELETE_AFTER_SEND_STR = os.getenv("DELETE_AFTER_SEND", "True")

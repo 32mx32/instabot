@@ -31,9 +31,13 @@ COMMENT_KEY_REGEX = re.compile(r'(/w|/W)\b', re.IGNORECASE)
 COMMENTS_CACHE = {}
 MAX_CACHE_SIZE = 1000  # Максимальное количество комментариев в кэше
 
+# Словарь для хранения URL для повторной попытки скачивания
+RETRY_URL_CACHE = {}
+
 # Префикс для callback данных
 SHOW_COMMENT_PREFIX = "show_comment:"
 HIDE_COMMENT_PREFIX = "hide_comment:"
+RETRY_DOWNLOAD_PREFIX = "retry:"
 
 
 def clean_comments_cache():
@@ -46,6 +50,18 @@ def clean_comments_cache():
         for key in keys_to_remove:
             del COMMENTS_CACHE[key]
         logger.info(f"Очищен кэш комментариев: удалено {items_to_remove} записей")
+
+
+def clean_retry_url_cache():
+    """Очищает кэш URL для повторных попыток, если он превышает максимальный размер"""
+    global RETRY_URL_CACHE
+    if len(RETRY_URL_CACHE) > MAX_CACHE_SIZE:
+        # Удаляем половину самых старых записей
+        items_to_remove = len(RETRY_URL_CACHE) - MAX_CACHE_SIZE // 2
+        keys_to_remove = list(RETRY_URL_CACHE.keys())[:items_to_remove]
+        for key in keys_to_remove:
+            del RETRY_URL_CACHE[key]
+        logger.info(f"Очищен кэш URL: удалено {items_to_remove} записей")
 
 
 def is_exact_reel_url(text):
@@ -161,6 +177,19 @@ def retry_apify_request(func, max_retries=3, delay=2):
             logger.warning(f"Попытка {attempt + 1} не удалась: {e}. Повторяем через {delay} секунд...")
             time.sleep(delay)
             delay *= 2  # Экспоненциальная задержка
+
+
+def download_reel_with_retry(post_url, max_attempts=3):
+    """Скачивание Reels с несколькими попытками"""
+    for attempt in range(1, max_attempts + 1):
+        logger.info(f"Попытка скачивания {attempt}/{max_attempts}: {post_url}")
+        file_path, file_type, caption = download_instagram_reel(post_url)
+        if file_path:
+            return file_path, file_type, caption
+        if attempt < max_attempts:
+            logger.warning(f"Попытка {attempt} не удалась, ожидаем 3 секунды перед повтором...")
+            time.sleep(3)
+    return None, None, None
 
 # Функция для скачивания Reels через Apify
 def download_instagram_reel(post_url, timeout=60):
@@ -362,6 +391,122 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             logger.warning(f"Информация о сообщении не найдена для UUID: {message_uuid}")
             await query.answer("Сообщение не найдено")
+    
+    # Проверяем, является ли это callback для повторной попытки скачивания
+    elif callback_data.startswith(RETRY_DOWNLOAD_PREFIX):
+        retry_id = callback_data[len(RETRY_DOWNLOAD_PREFIX):]
+        
+        # Получаем URL из кэша
+        if retry_id not in RETRY_URL_CACHE:
+            logger.error(f"URL не найден в кэше для retry_id: {retry_id}")
+            await query.answer("⚠️ Ссылка устарела. Отправьте URL снова.")
+            return
+        
+        reel_url = RETRY_URL_CACHE[retry_id]
+        logger.info(f"Повторная попытка скачивания: {reel_url}")
+        
+        # Обновляем сообщение
+        await query.edit_message_text("Скачиваю Reels...")
+        await query.answer()
+        
+        # Скачиваем Reels с 3 попытками
+        file_path, file_type, caption_text = download_reel_with_retry(reel_url)
+        
+        if file_path:
+            try:
+                # Базовая подпись с кликабельной ссылкой на Reels
+                caption = f"[Reels]({reel_url})"
+                
+                # Создаем inline-клавиатуру если есть комментарий
+                keyboard = None
+                if caption_text:
+                    # Очищаем кэш при необходимости
+                    clean_comments_cache()
+                    
+                    # Генерируем уникальный ID для комментария
+                    comment_id = str(uuid.uuid4())
+                    # Сохраняем комментарий в кэш
+                    COMMENTS_CACHE[comment_id] = caption_text
+                    # Создаем кнопку для отображения комментария
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Показать комментарий", callback_data=f"{SHOW_COMMENT_PREFIX}{comment_id}")]
+                    ])
+                    logger.info(f"Сохранен комментарий с ID {comment_id}: {caption_text[:50]}...")
+
+                # Извлекаем message_thread_id из сообщения
+                message_thread_id = query.message.message_thread_id if hasattr(query.message, 'message_thread_id') else None
+
+                kwargs = {
+                    "chat_id": query.message.chat_id,
+                    "caption": caption,
+                    "parse_mode": 'Markdown',
+                    "reply_markup": keyboard
+                }
+                
+                # Добавляем message_thread_id только если он не None
+                if message_thread_id is not None:
+                    kwargs["message_thread_id"] = message_thread_id
+
+                if file_type == "video":
+                    with open(file_path, "rb") as video_file:
+                        await context.bot.send_video(
+                            video=video_file,
+                            **kwargs
+                        )
+                elif file_type == "photo":
+                    with open(file_path, "rb") as photo_file:
+                        await context.bot.send_photo(
+                            photo=photo_file,
+                            **kwargs
+                        )
+                else:
+                    await query.edit_message_text("Неизвестный тип медиа.")
+
+                # Удаляем сообщение об ошибке
+                try:
+                    await context.bot.delete_message(
+                        chat_id=query.message.chat_id,
+                        message_id=query.message.message_id
+                    )
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить сообщение: {e}")
+
+                # Удаление скачанного файла после отправки, если включено
+                if DELETE_AFTER_SEND:
+                    try:
+                        os.remove(file_path)
+                        logger.info(f"Файл {file_path} удален.")
+                    except Exception as e:
+                        logger.warning(f"Не удалось удалить файл {file_path}: {e}")
+            except FileNotFoundError:
+                logger.error("Файл не был найден. Возможно, произошла ошибка при скачивании.")
+                await query.edit_message_text("⚠️ Файл не был найден. Возможно, пост недоступен или был удален.")
+            except Exception as e:
+                logger.error(f"Произошла ошибка при отправке файла: {e}")
+                await query.edit_message_text(f"⚠️ Произошла ошибка при отправке файла: {e}")
+        else:
+            # Если снова не удалось скачать - обновляем сообщение с кнопкой
+            logger.error("Не удалось скачать Reels после повторной попытки.")
+            # Очищаем кэш при необходимости
+            clean_retry_url_cache()
+            # Генерируем уникальный ID для URL
+            retry_id = str(uuid.uuid4())[:8]  # Используем короткий ID
+            # Сохраняем URL в кэш
+            RETRY_URL_CACHE[retry_id] = reel_url
+            retry_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Повторить", callback_data=f"{RETRY_DOWNLOAD_PREFIX}{retry_id}")]
+            ])
+            await query.edit_message_text(
+                f"⚠️ Не удалось скачать Reels после 3 попыток.\n"
+                f"Ссылка: {reel_url}\n\n"
+                "Возможные причины:\n"
+                "• Пост недоступен или был удален\n"
+                "• Аккаунт является приватным\n"
+                "• Контент защищен от скачивания\n"
+                "• Неверная ссылка\n\n"
+                "Вы можете попробовать снова, нажав кнопку ниже.",
+                reply_markup=retry_keyboard
+            )
     else:
         await query.answer()
 
@@ -393,8 +538,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Не удалось отправить статусное сообщение: {e}")
             status_message = None
 
-        # Скачиваем Reels через Apify
-        file_path, file_type, caption_text = download_instagram_reel(extracted_url)
+        # Скачиваем Reels через Apify с 3 попытками
+        file_path, file_type, caption_text = download_reel_with_retry(extracted_url)
 
         if file_path:
             try:
@@ -474,15 +619,54 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.error(f"Произошла ошибка при отправке файла: {e}")
                 await update.message.reply_text(f"⚠️ Произошла ошибка при отправке файла: {e}")
         else:
-            logger.error("Не удалось скачать Reels. Проверьте ссылку.")
-            await update.message.reply_text(
-                "⚠️ Не удалось скачать Reels.\n"
-                "Возможные причины:\n"
-                "• Пост недоступен или был удален\n"
-                "• Аккаунт является приватным\n"
-                "• Контент защищен от скачивания\n"
-                "• Неверная ссылка"
-            )
+            logger.error("Не удалось скачать Reels после 3 попыток. Проверьте ссылку.")
+            # Очищаем кэш при необходимости
+            clean_retry_url_cache()
+            # Генерируем уникальный ID для URL
+            retry_id = str(uuid.uuid4())[:8]  # Используем короткий ID
+            # Сохраняем URL в кэш
+            RETRY_URL_CACHE[retry_id] = extracted_url
+            # Создаем кнопку "Повторить" с коротким ID в callback_data
+            retry_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Повторить", callback_data=f"{RETRY_DOWNLOAD_PREFIX}{retry_id}")]
+            ])
+            
+            # Извлекаем message_thread_id из входящего сообщения
+            message_thread_id = update.message.message_thread_id if hasattr(update.message, 'message_thread_id') else None
+            
+            kwargs = {
+                "chat_id": update.effective_chat.id,
+                "text": f"⚠️ Не удалось скачать Reels после 3 попыток.\n"
+                        f"Ссылка: {extracted_url}\n\n"
+                        "Возможные причины:\n"
+                        "• Пост недоступен или был удален\n"
+                        "• Аккаунт является приватным\n"
+                        "• Контент защищен от скачивания\n"
+                        "• Неверная ссылка\n\n"
+                        "Вы можете попробовать снова, нажав кнопку ниже.",
+                "reply_markup": retry_keyboard
+            }
+            
+            # Добавляем message_thread_id только если он не None
+            if message_thread_id is not None:
+                kwargs["message_thread_id"] = message_thread_id
+            
+            await context.bot.send_message(**kwargs)
+            
+            # Удаляем статусное сообщение
+            if status_message:
+                try:
+                    await context.bot.delete_message(chat_id=update.effective_chat.id,
+                                                     message_id=status_message.message_id)
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить статусное сообщение: {e}")
+            
+            # Удаляем исходное сообщение пользователя со ссылкой
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id,
+                                                 message_id=update.message.message_id)
+            except Exception as e:
+                logger.warning(f"Не удалось удалить исходное сообщение: {e}")
     elif 'instagram.com' in user_message:
         # Если это ссылка на Instagram, но не на Reels
         await update.message.reply_text(
