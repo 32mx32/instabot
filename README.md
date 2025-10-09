@@ -3,6 +3,7 @@
 Мощный Telegram-бот для скачивания контента из Instagram с автоматическими повторными попытками, защитой от спама и подробной статистикой.
 
 <p align="center">
+  <img src="https://img.shields.io/badge/Version-2.1.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python Version">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
   <img src="https://img.shields.io/badge/Status-Production%20Ready-brightgreen" alt="Status">
@@ -290,7 +291,7 @@ instabot/
 
 См. [CHANGELOG.md](CHANGELOG.md) для полной истории изменений.
 
-**Последняя версия (октябрь 2025):**
+**v2.1.0 (Октябрь 2025):**
 - ✅ Rate limiting для защиты от спама
 - ✅ Команды `/help` и `/stats`
 - ✅ Индикатор прогресса
@@ -300,6 +301,7 @@ instabot/
 - ✅ Кэширование файлов (TTL 1 час, до 50 файлов)
 - ✅ Type hints для всех функций
 - ✅ Детальный анализ ошибок (timeout, 404, 401, rate limit и др.)
+- ✅ Версионирование бота
 
 ## 🐛 Troubleshooting
 

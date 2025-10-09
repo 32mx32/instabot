@@ -14,6 +14,10 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, List, Dict, Set, Any
 
+# Версия бота
+BOT_VERSION = "2.1.0"
+RELEASE_DATE = "Октябрь 2025"
+
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -558,7 +562,7 @@ def download_instagram_reel(post_url, timeout=60):
 
 # Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = """
+    welcome_text = f"""
 👋 Привет! Я бот для скачивания контента из Instagram.
 
 📝 **Что я умею:**
@@ -573,13 +577,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📌 **Как пользоваться:**
 Просто отправьте мне ссылку на пост или Reels из Instagram!
+
+ℹ️ Версия: **{BOT_VERSION}** ({RELEASE_DATE})
     """
     await update.message.reply_text(welcome_text)
 
 
 # Обработчик команды /help
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = """
+    help_text = f"""
 📖 **Подробная справка**
 
 **Поддерживаемые ссылки:**
@@ -596,6 +602,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 **Комментарии:**
 Если к посту есть комментарий, появится кнопка "Показать комментарий"
 
+**Возможности:**
+• 🗂️ Кэширование популярных постов (1 час)
+• ⏳ Индикатор прогресса (попытка 1/3, 2/3, 3/3)
+• 🔍 Детальный анализ ошибок
+• 🔄 Автоматические 3 попытки + кнопка "Повторить"
+
 **Ограничения:**
 • Максимум 5 запросов в минуту
 • Приватные аккаунты недоступны
@@ -605,6 +617,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /start - Главное меню
 /help - Эта справка
 /stats - Статистика использования
+
+ℹ️ **Версия бота:** {BOT_VERSION} ({RELEASE_DATE})
+📦 **Новое:** Кэширование файлов, Type hints, Детальные ошибки
 
 ❓ Возникли проблемы? Попробуйте нажать кнопку "🔄 Повторить" если скачивание не удалось.
     """
