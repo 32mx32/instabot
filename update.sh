@@ -15,8 +15,8 @@ rsync -avz --exclude 'venv' --exclude '__pycache__' --exclude '.git' ./ $SERVER_
 # Подключаемся к серверу и выполняем команды
 echo "Перезапуск контейнеров на сервере..."
 ssh $SERVER_USER@$SERVER_HOST "cd $REPO_PATH && \
-    docker-compose down && \
-    docker-compose pull && \
-    docker-compose up -d"
+    docker compose down && \
+    docker compose pull && \
+    docker compose up -d"
 
-echo "Развертывание завершено!" 
+echo "Развертывание завершено!"

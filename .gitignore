@@ -27,4 +27,3 @@ Thumbs.db
 # Логи
 *.log
 bot.log
-.env

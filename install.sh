@@ -40,8 +40,9 @@ if ! docker compose version &> /dev/null; then
     COMPOSE_URL="https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${ARCH}"
     
     echo -e "${YELLOW}Скачиваем Docker Compose...${NC}"
-    sudo curl -L "$COMPOSE_URL" -o /usr/local/bin/docker-compose
-    sudo chmod +x /usr/local/bin/docker-compose
+    sudo mkdir -p /usr/local/lib/docker/cli-plugins
+    sudo curl -L "$COMPOSE_URL" -o /usr/local/lib/docker/cli-plugins/docker-compose
+    sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
     
     # Проверяем установку
     if docker compose version &> /dev/null; then

@@ -15,8 +15,8 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple, List, Dict, Set, Any
 
 # Версия бота
-BOT_VERSION = "2.1.0"
-RELEASE_DATE = "Октябрь 2025"
+BOT_VERSION = "2.2.0"
+RELEASE_DATE = "Май 2026"
 
 # Настройка логирования
 logging.basicConfig(
@@ -728,7 +728,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /stats - Статистика использования
 
 ℹ️ **Версия бота:** {BOT_VERSION} ({RELEASE_DATE})
-📦 **Новое:** Кэширование файлов, Type hints, Детальные ошибки
+📦 **Новое:** Ротация Apify API ключей, кэширование файлов, детальные ошибки
 
 ❓ Возникли проблемы? Попробуйте нажать кнопку "🔄 Повторить" если скачивание не удалось.
     """

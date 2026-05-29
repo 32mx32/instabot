@@ -3,7 +3,7 @@
 Мощный Telegram-бот для скачивания контента из Instagram с автоматическими повторными попытками, защитой от спама и подробной статистикой.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.1.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-2.2.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python Version">
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
   <img src="https://img.shields.io/badge/Status-Production%20Ready-brightgreen" alt="Status">
@@ -94,13 +94,13 @@ python main.py
 cp .env.example .env
 
 # Запустите бота
-docker-compose up -d
+docker compose up -d
 
 # Просмотр логов
-docker-compose logs -f
+docker compose logs -f
 
 # Остановка
-docker-compose down
+docker compose down
 ```
 
 ### На сервере (автоматическая установка)
@@ -305,6 +305,12 @@ instabot/
 
 См. [CHANGELOG.md](CHANGELOG.md) для полной истории изменений.
 
+**v2.2.0 (Май 2026):**
+- ✅ Ротация нескольких Apify API ключей
+- ✅ Поддержка `APIFY_API_KEYS` через запятую
+- ✅ Временное отключение ключей при лимитах, квотах и ошибках авторизации
+- ✅ Обновлены `.env.example`, README, install/update скрипты
+
 **v2.1.0 (Октябрь 2025):**
 - ✅ Rate limiting для защиты от спама
 - ✅ Команды `/help` и `/stats`
@@ -320,8 +326,8 @@ instabot/
 ## 🐛 Troubleshooting
 
 ### Бот не отвечает
-1. Проверьте, что бот запущен: `docker-compose ps` или `ps aux | grep python`
-2. Проверьте логи: `docker-compose logs` или `tail -f bot.log`
+1. Проверьте, что бот запущен: `docker compose ps` или `ps aux | grep python`
+2. Проверьте логи: `docker compose logs` или `tail -f bot.log`
 3. Проверьте токены в `.env`
 
 ### Ошибка "Rate limit exceeded"
