@@ -80,11 +80,11 @@ if [ ! -f ".env" ]; then
     done
     
     while true; do
-        read -p "Введите API ключ Apify: " APIFY_API_KEY
-        if [[ $APIFY_API_KEY =~ ^apify_api_[A-Za-z0-9]+$ ]]; then
+        read -p "Введите API ключи Apify через запятую: " APIFY_API_KEYS
+        if [[ $APIFY_API_KEYS =~ ^apify_api_[A-Za-z0-9]+([[:space:]]*,[[:space:]]*apify_api_[A-Za-z0-9]+)*$ ]]; then
             break
         else
-            echo -e "${RED}Неверный формат API ключа. Ключ должен начинаться с 'apify_api_'${NC}"
+            echo -e "${RED}Неверный формат API ключей. Каждый ключ должен начинаться с 'apify_api_', несколько ключей разделяйте запятой${NC}"
         fi
     done
     
@@ -93,7 +93,14 @@ if [ ! -f ".env" ]; then
     
     # Обновляем .env файл
     sed -i "s|TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN|g" .env
-    sed -i "s|APIFY_API_KEY=.*|APIFY_API_KEY=$APIFY_API_KEY|g" .env
+    sed -i "s|APIFY_API_KEY=.*|APIFY_API_KEY=|g" .env
+    if grep -q "^# APIFY_API_KEYS=" .env; then
+        sed -i "s|^# APIFY_API_KEYS=.*|APIFY_API_KEYS=$APIFY_API_KEYS|g" .env
+    elif grep -q "^APIFY_API_KEYS=" .env; then
+        sed -i "s|APIFY_API_KEYS=.*|APIFY_API_KEYS=$APIFY_API_KEYS|g" .env
+    else
+        echo "APIFY_API_KEYS=$APIFY_API_KEYS" >> .env
+    fi
     sed -i "s|DELETE_AFTER_SEND=.*|DELETE_AFTER_SEND=$DELETE_AFTER_SEND|g" .env
     
     echo -e "${GREEN}Файл .env настроен и проверен${NC}"
@@ -106,8 +113,13 @@ else
         exit 1
     fi
     
-    if grep -q "YOUR_APIFY_API_KEY" .env; then
+    if grep -q "YOUR_APIFY_API_KEY" .env || grep -q "YOUR_APIFY_API_KEYS" .env; then
         echo -e "${RED}Обнаружены placeholder API ключи в .env файле. Пожалуйста, настройте реальные ключи.${NC}"
+        exit 1
+    fi
+
+    if ! grep -Eq "^(APIFY_API_KEY|APIFY_API_KEYS)=apify_api_" .env; then
+        echo -e "${RED}В .env не найден ни один реальный Apify API ключ.${NC}"
         exit 1
     fi
     

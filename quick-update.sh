@@ -24,8 +24,13 @@ if [ ! -f ".env" ]; then
 fi
 
 # Проверяем, что токены настроены
-if grep -q "YOUR_TELEGRAM_BOT_TOKEN" .env || grep -q "YOUR_APIFY_API_KEY" .env; then
+if grep -q "YOUR_TELEGRAM_BOT_TOKEN" .env || grep -q "YOUR_APIFY_API_KEY" .env || grep -q "YOUR_APIFY_API_KEYS" .env; then
     echo -e "${RED}❌ Обнаружены placeholder токены в .env файле. Настройте реальные токены.${NC}"
+    exit 1
+fi
+
+if ! grep -Eq "^(APIFY_API_KEY|APIFY_API_KEYS)=apify_api_" .env; then
+    echo -e "${RED}❌ В .env не найден ни один реальный Apify API ключ.${NC}"
     exit 1
 fi
 

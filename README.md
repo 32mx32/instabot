@@ -25,6 +25,7 @@
 - 📝 Подробное логирование в файл и консоль
 - 💾 Автоматическая очистка кэша
 - 🗂️ Кэширование файлов (1 час, до 50 файлов)
+- 🔁 Ротация нескольких Apify API ключей при лимитах и ограничениях
 - 🎯 Type hints для всех функций (Python 3.10+)
 
 ### 📊 Статистика и мониторинг
@@ -74,6 +75,8 @@ nano .env  # или любой другой редактор
 ```env
 TELEGRAM_BOT_TOKEN=your_bot_token_from_@BotFather
 APIFY_API_KEY=your_apify_api_key
+# или несколько ключей через запятую:
+# APIFY_API_KEYS=apify_api_key_1,apify_api_key_2,apify_api_key_3
 DELETE_AFTER_SEND=true
 ```
 
@@ -161,8 +164,19 @@ https://instagram.com/tv/ABC123...
 | Переменная | Описание | Обязательна | Значение по умолчанию |
 |------------|----------|-------------|----------------------|
 | `TELEGRAM_BOT_TOKEN` | Токен бота от [@BotFather](https://t.me/BotFather) | ✅ Да | - |
-| `APIFY_API_KEY` | API ключ от [Apify](https://console.apify.com/settings/integrations) | ✅ Да | - |
+| `APIFY_API_KEY` | Один API ключ от [Apify](https://console.apify.com/settings/integrations), старый совместимый формат | ✅ Да* | - |
+| `APIFY_API_KEYS` | Несколько API ключей Apify через запятую для автоматического переключения при лимитах | ✅ Да* | - |
 | `DELETE_AFTER_SEND` | Удалять файлы после отправки | ❌ Нет | `true` |
+
+`*` Нужно задать хотя бы одну из переменных: `APIFY_API_KEY` или `APIFY_API_KEYS`.
+
+Пример с несколькими Apify аккаунтами:
+
+```env
+APIFY_API_KEYS=apify_api_key_1,apify_api_key_2,apify_api_key_3
+```
+
+Если Apify вернет ошибку лимита, квоты, оплаты, авторизации или rate limit по текущему ключу, бот временно отключит этот ключ и попробует следующий.
 
 ### Настройки в коде
 

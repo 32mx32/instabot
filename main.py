@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from apify_client import ApifyClient
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
-from config import TELEGRAM_BOT_TOKEN, APIFY_API_KEY, DELETE_AFTER_SEND
+from config import TELEGRAM_BOT_TOKEN, APIFY_API_KEYS, DELETE_AFTER_SEND
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -72,6 +72,81 @@ MAX_FILE_CACHE_SIZE = 50  # Максимум файлов в кэше
 SHOW_COMMENT_PREFIX = "show_comment:"
 HIDE_COMMENT_PREFIX = "hide_comment:"
 RETRY_DOWNLOAD_PREFIX = "retry:"
+
+# Ротация Apify API ключей
+APIFY_KEY_COOLDOWN_SECONDS = 15 * 60
+APIFY_ROTATION_ERROR_MARKERS = (
+    "401", "402", "403", "429",
+    "unauthorized", "forbidden", "payment", "billing",
+    "rate limit", "too many", "quota", "limit exceeded",
+    "monthly usage", "usage limit", "insufficient", "credit",
+    "token", "api key",
+)
+
+
+def mask_apify_key(api_key: str) -> str:
+    """Маскирует API ключ для безопасного логирования."""
+    if len(api_key) <= 8:
+        return "***"
+    return f"{api_key[:10]}...{api_key[-4:]}"
+
+
+def is_apify_rotation_error(error: Exception) -> bool:
+    """Определяет ошибки, при которых стоит переключиться на другой Apify ключ."""
+    error_msg = str(error).lower()
+    return any(marker in error_msg for marker in APIFY_ROTATION_ERROR_MARKERS)
+
+
+class ApifyKeyManager:
+    """Управляет доступными Apify ключами и временно отключает проблемные."""
+
+    def __init__(self, api_keys: List[str]):
+        self.api_keys = api_keys
+        self.current_index = 0
+        self.disabled_until: Dict[str, float] = {}
+
+    def get_available_keys(self) -> List[str]:
+        now = time.time()
+        available = [
+            key for key in self.api_keys
+            if self.disabled_until.get(key, 0) <= now
+        ]
+
+        if not available:
+            logger.warning("Все Apify ключи временно отключены, пробуем полный список повторно")
+            self.disabled_until.clear()
+            available = self.api_keys[:]
+
+        ordered_keys = []
+        total_keys = len(self.api_keys)
+        for offset in range(total_keys):
+            index = (self.current_index + offset) % total_keys
+            key = self.api_keys[index]
+            if key in available:
+                ordered_keys.append(key)
+
+        return ordered_keys
+
+    def mark_success(self, api_key: str) -> None:
+        if api_key in self.api_keys:
+            self.current_index = self.api_keys.index(api_key)
+        self.disabled_until.pop(api_key, None)
+
+    def mark_limited(self, api_key: str, error: Exception) -> None:
+        if len(self.api_keys) == 1:
+            return
+
+        self.disabled_until[api_key] = time.time() + APIFY_KEY_COOLDOWN_SECONDS
+        self.current_index = (self.api_keys.index(api_key) + 1) % len(self.api_keys)
+        logger.warning(
+            "Apify ключ %s временно отключен на %s секунд: %s",
+            mask_apify_key(api_key),
+            APIFY_KEY_COOLDOWN_SECONDS,
+            error,
+        )
+
+
+apify_key_manager = ApifyKeyManager(APIFY_API_KEYS)
 
 
 def clean_comments_cache() -> None:
@@ -358,16 +433,53 @@ def download_file(url: str, folder: str = "instagram_downloads", timeout: int = 
 
 
 def retry_apify_request(func, max_retries=3, delay=2):
-    """Retry механизм для Apify запросов"""
-    for attempt in range(max_retries):
-        try:
-            return func()
-        except Exception as e:
-            if attempt == max_retries - 1:
-                raise e
-            logger.warning(f"Попытка {attempt + 1} не удалась: {e}. Повторяем через {delay} секунд...")
-            time.sleep(delay)
-            delay *= 2  # Экспоненциальная задержка
+    """Retry механизм для Apify запросов с переключением API ключей."""
+    last_error = None
+
+    for api_key in apify_key_manager.get_available_keys():
+        client = ApifyClient(api_key)
+        current_delay = delay
+
+        for attempt in range(max_retries):
+            try:
+                result = func(client)
+                apify_key_manager.mark_success(api_key)
+                return result, client
+            except Exception as e:
+                last_error = e
+
+                if is_apify_rotation_error(e):
+                    apify_key_manager.mark_limited(api_key, e)
+                    logger.warning(
+                        "Переключаем Apify ключ после ошибки на %s: %s",
+                        mask_apify_key(api_key),
+                        e,
+                    )
+                    break
+
+                if attempt == max_retries - 1:
+                    logger.warning(
+                        "Все попытки для Apify ключа %s исчерпаны: %s",
+                        mask_apify_key(api_key),
+                        e,
+                    )
+                    break
+
+                logger.warning(
+                    "Попытка %s/%s для Apify ключа %s не удалась: %s. Повторяем через %s секунд...",
+                    attempt + 1,
+                    max_retries,
+                    mask_apify_key(api_key),
+                    e,
+                    current_delay,
+                )
+                time.sleep(current_delay)
+                current_delay *= 2
+
+    if last_error:
+        raise last_error
+
+    raise RuntimeError("Нет доступных Apify API ключей")
 
 
 async def download_reel_with_retry(post_url: str, max_attempts: int = 3, status_message: Optional[Message] = None) -> Tuple[Optional[str], Optional[str], Optional[str]]:
@@ -414,9 +526,6 @@ async def download_reel_with_retry(post_url: str, max_attempts: int = 3, status_
 # Функция для скачивания Reels через Apify
 def download_instagram_reel(post_url, timeout=60):
     try:
-        # Инициализация клиента Apify
-        client = ApifyClient(APIFY_API_KEY)
-        
         # Переменные для хранения результатов
         file_path = None
         file_type = None
@@ -426,13 +535,13 @@ def download_instagram_reel(post_url, timeout=60):
         try:
             logger.info(f"Пытаемся скачать с помощью easyapi/instagram-reels-downloader: {post_url}")
             
-            def run_easyapi():
+            def run_easyapi(client):
                 run_input = {
                     "reelUrls": [post_url],
                 }
                 return client.actor("easyapi/instagram-reels-downloader").call(run_input=run_input)
             
-            run = retry_apify_request(run_easyapi)
+            run, client = retry_apify_request(run_easyapi)
             
             # Получаем результаты
             dataset_items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
@@ -463,7 +572,7 @@ def download_instagram_reel(post_url, timeout=60):
         try:
             logger.info(f"Пытаемся скачать с помощью apify/instagram-reel-scraper: {post_url}")
             
-            def run_apify_scraper():
+            def run_apify_scraper(client):
                 run_input = {
                     "usernames": [],
                     "urls": [post_url],
@@ -471,7 +580,7 @@ def download_instagram_reel(post_url, timeout=60):
                 }
                 return client.actor("apify/instagram-reel-scraper").call(run_input=run_input)
             
-            run = retry_apify_request(run_apify_scraper)
+            run, client = retry_apify_request(run_apify_scraper)
             
             # Получаем результаты
             dataset_items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
@@ -518,13 +627,13 @@ def download_instagram_reel(post_url, timeout=60):
         try:
             logger.info(f"Пытаемся скачать с помощью оригинального метода: {post_url}")
             
-            def run_original_method():
+            def run_original_method(client):
                 run_input = {
                     "reelLinks": [post_url],
                 }
                 return client.actor("presetshubham/instagram-reel-downloader").call(run_input=run_input)
             
-            run = retry_apify_request(run_original_method)
+            run, client = retry_apify_request(run_original_method)
             
             # Получаем результаты
             dataset_items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
