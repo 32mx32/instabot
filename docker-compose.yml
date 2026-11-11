@@ -6,8 +6,9 @@ services:
     volumes:
       - ./instagram_downloads:/app/instagram_downloads
       - ./logs:/app/logs
-      # Необязательно: cookies для yt-dlp (см. YTDLP_COOKIES_FILE в .env)
-      - ./cookies:/app/cookies:ro
+      # Необязательно: cookies для yt-dlp (см. YTDLP_COOKIES_FILE в .env).
+      # Без :ro — yt-dlp перезаписывает файл обновлёнными cookies после каждой загрузки
+      - ./cookies:/app/cookies
     environment:
       - TZ=Europe/Moscow
     env_file:
