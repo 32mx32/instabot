@@ -12,9 +12,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from apify_client import ApifyClient
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.constants import ParseMode
-from telegram.error import BadRequest, TimedOut
+from telegram.error import BadRequest, Conflict, NetworkError, TimedOut
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -27,6 +27,7 @@ from telegram.ext import (
 from config import (
     ADMIN_IDS,
     APIFY_API_KEYS,
+    DB_PATH,
     DELETE_AFTER_SEND,
     MAX_PARALLEL_DOWNLOADS,
     TELEGRAM_BOT_TOKEN,
@@ -34,10 +35,11 @@ from config import (
     YTDLP_COOKIES_FILE,
 )
 from links import MediaLink, extract_link, is_instagram_stories, link_from_resolved_url
+from storage import Storage
 from ytdlp_downloader import FileTooLargeError, download_with_ytdlp
 
 # Версия бота
-BOT_VERSION = "2.3.0"
+BOT_VERSION = "2.4.0"
 RELEASE_DATE = "Ноябрь 2026"
 
 # Логирование настраивается в config.py
@@ -46,8 +48,10 @@ logger = logging.getLogger(__name__)
 DOWNLOAD_FOLDER = "instagram_downloads"
 MAX_TELEGRAM_FILE_SIZE = 50 * 1024 * 1024
 
-# Кэши в памяти
-COMMENTS_CACHE: Dict[str, str] = {}
+# Хранилище: кэш file_id, избранное, статистика
+storage = Storage(DB_PATH)
+
+# Ссылки для кнопки «Повторить» (в памяти — после рестарта ссылку можно прислать заново)
 RETRY_LINK_CACHE: Dict[str, MediaLink] = {}
 MAX_CACHE_SIZE = 1000
 
@@ -55,25 +59,14 @@ MAX_CACHE_SIZE = 1000
 user_requests: Dict[int, List[datetime]] = defaultdict(list)
 MAX_REQUESTS_PER_MINUTE = 5
 
-# Статистика
-stats: Dict[str, Any] = {
-    'total_downloads': 0,
-    'successful_downloads': 0,
-    'failed_downloads': 0,
-    'ytdlp_downloads': 0,
-    'apify_downloads': 0,
-    'users': set(),
-}
-
-# Кэш скачанных файлов (URL -> (file_path, timestamp)).
-# Используется только при DELETE_AFTER_SEND=false — по умолчанию файлы удаляются сразу после отправки.
-file_cache: Dict[str, Tuple[str, float]] = {}
-CACHE_TTL = 3600  # 1 час
-MAX_FILE_CACHE_SIZE = 50
-
-# Префиксы для callback данных
+# Префиксы для callback данных (лимит Telegram — 64 байта)
 SHOW_COMMENT_PREFIX = "show_comment:"
 RETRY_DOWNLOAD_PREFIX = "retry:"
+FAVORITE_PREFIX = "fav:"
+SEND_SAVED_PREFIX = "send:"
+SAVED_PAGE_PREFIX = "saved:"
+
+SAVED_PAGE_SIZE = 10
 
 # Попытки скачивания на один запрос пользователя
 DOWNLOAD_ATTEMPTS = 2
@@ -168,6 +161,7 @@ class ApifyKeyManager:
 apify_key_manager = ApifyKeyManager(APIFY_API_KEYS)
 
 
+
 # ---------------------------------------------------------------------------
 # Кэши и rate limit
 # ---------------------------------------------------------------------------
@@ -188,38 +182,6 @@ def _remove_file(file_path: str) -> None:
             logger.info(f"Файл {file_path} удален.")
     except OSError as e:
         logger.warning(f"Не удалось удалить файл {file_path}: {e}")
-
-
-def clean_file_cache() -> None:
-    """Удаляет устаревшие файлы из кэша и самые старые при превышении лимита."""
-    current_time = time.time()
-    for url in [u for u, (_, ts) in file_cache.items() if current_time - ts > CACHE_TTL]:
-        _remove_file(file_cache.pop(url)[0])
-
-    if len(file_cache) > MAX_FILE_CACHE_SIZE:
-        sorted_cache = sorted(file_cache.items(), key=lambda item: item[1][1])
-        for url, (file_path, _) in sorted_cache[:len(file_cache) - MAX_FILE_CACHE_SIZE]:
-            _remove_file(file_path)
-            del file_cache[url]
-
-
-def get_cached_file(url: str) -> Optional[str]:
-    """Возвращает файл из кэша, если он существует и не устарел."""
-    if url not in file_cache:
-        return None
-    file_path, timestamp = file_cache[url]
-    if time.time() - timestamp > CACHE_TTL or not os.path.exists(file_path):
-        _remove_file(file_path)
-        del file_cache[url]
-        return None
-    logger.info(f"Файл найден в кэше: {url}")
-    return file_path
-
-
-def add_to_file_cache(url: str, file_path: str) -> None:
-    file_cache[url] = (file_path, time.time())
-    if len(file_cache) > MAX_FILE_CACHE_SIZE:
-        clean_file_cache()
 
 
 def check_rate_limit(user_id: int) -> bool:
@@ -244,7 +206,9 @@ class DownloadResult:
     file_type: Optional[str] = None
     caption: Optional[str] = None
     error: Optional[str] = None  # "too_large" | None
-    source: Optional[str] = None  # "ytdlp" | "apify" | "cache"
+    source: Optional[str] = None  # "ytdlp" | "apify"
+    author: Optional[str] = None
+    link: Optional[MediaLink] = None  # итоговая ссылка (после раскрытия share-ссылки)
 
 
 def download_file(url: str, folder: str = DOWNLOAD_FOLDER, timeout: int = 30) -> Tuple[Optional[str], Optional[str]]:
@@ -349,9 +313,10 @@ APIFY_ACTORS = (
 )
 
 
-def download_instagram_reel(post_url: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def download_instagram_reel(post_url: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     """Скачивает Instagram медиа через акторы Apify (по очереди до первого успеха)."""
     caption = None
+    author = None
     for actor, build_input in APIFY_ACTORS:
         try:
             logger.info(f"Apify: пробуем {actor} для {post_url}")
@@ -375,20 +340,21 @@ def download_instagram_reel(post_url: str) -> Tuple[Optional[str], Optional[str]
 
             item = dataset_items[0]
             caption = caption or item.get("caption") or item.get("description") or item.get("text")
+            author = author or item.get("ownerUsername") or item.get("username") or item.get("owner_username")
             media_url = _extract_media_url(actor, item)
             logger.info(f"Apify ({actor}) media URL найден: {bool(media_url)}")
 
             if media_url:
                 file_path, file_type = download_file(media_url)
                 if file_path:
-                    return file_path, file_type, caption
+                    return file_path, file_type, caption, author
         except FileTooLargeError:
             raise
         except Exception as e:
             logger.warning(f"Ошибка при скачивании через {actor}: {e}")
 
     logger.error("Все методы скачивания через Apify не удались.")
-    return None, None, None
+    return None, None, None, None
 
 
 def resolve_share_link(link: MediaLink) -> MediaLink:
@@ -418,9 +384,11 @@ def fetch_media_sync(link: MediaLink) -> DownloadResult:
 
     if USE_YTDLP:
         try:
-            file_path, file_type, caption = download_with_ytdlp(link.url, DOWNLOAD_FOLDER, YTDLP_COOKIES_FILE)
+            file_path, file_type, caption, author = download_with_ytdlp(
+                link.url, DOWNLOAD_FOLDER, YTDLP_COOKIES_FILE
+            )
             logger.info(f"yt-dlp: скачано {link.url}")
-            return DownloadResult(file_path, file_type, caption, source="ytdlp")
+            return DownloadResult(file_path, file_type, caption, source="ytdlp", author=author, link=link)
         except FileTooLargeError as e:
             logger.warning(f"yt-dlp: {e}")
             return DownloadResult(error="too_large")
@@ -429,11 +397,11 @@ def fetch_media_sync(link: MediaLink) -> DownloadResult:
 
     if link.platform == "instagram" and APIFY_API_KEYS:
         try:
-            file_path, file_type, caption = download_instagram_reel(link.url)
+            file_path, file_type, caption, author = download_instagram_reel(link.url)
         except FileTooLargeError:
             return DownloadResult(error="too_large")
         if file_path:
-            return DownloadResult(file_path, file_type, caption, source="apify")
+            return DownloadResult(file_path, file_type, caption, source="apify", author=author, link=link)
 
     return DownloadResult()
 
@@ -476,11 +444,6 @@ async def safe_delete(message: Optional[Message]) -> None:
 
 async def fetch_media(link: MediaLink, status_message: Optional[Message]) -> DownloadResult:
     """Скачивает медиа с повторными попытками, не блокируя event loop."""
-    cached_file = get_cached_file(link.url)
-    if cached_file:
-        file_type = 'video' if cached_file.lower().endswith(('.mp4', '.mov', '.webm')) else 'photo'
-        return DownloadResult(cached_file, file_type, source="cache")
-
     result = DownloadResult()
     semaphore = get_download_semaphore()
     for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
@@ -498,15 +461,22 @@ async def fetch_media(link: MediaLink, status_message: Optional[Message]) -> Dow
     return result
 
 
-def _comment_keyboard(caption_text: Optional[str]) -> Optional[InlineKeyboardMarkup]:
-    if not caption_text:
+def _thread_id(message: Optional[Message]) -> Optional[int]:
+    if message is None:
         return None
-    trim_cache(COMMENTS_CACHE, "комментариев")
-    comment_id = uuid.uuid4().hex
-    COMMENTS_CACHE[comment_id] = caption_text
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Показать комментарий", callback_data=f"{SHOW_COMMENT_PREFIX}{comment_id}")]
-    ])
+    return message.message_thread_id if message.is_topic_message else None
+
+
+def _row_link(row) -> MediaLink:
+    return MediaLink(row["platform"], row["url"], row["kind"])
+
+
+def media_keyboard(media_id: int, has_caption: bool) -> InlineKeyboardMarkup:
+    buttons = []
+    if has_caption:
+        buttons.append(InlineKeyboardButton("💬 Подпись", callback_data=f"{SHOW_COMMENT_PREFIX}{media_id}"))
+    buttons.append(InlineKeyboardButton("⭐ В избранное", callback_data=f"{FAVORITE_PREFIX}{media_id}"))
+    return InlineKeyboardMarkup([buttons])
 
 
 def _retry_keyboard(link: MediaLink) -> InlineKeyboardMarkup:
@@ -518,46 +488,94 @@ def _retry_keyboard(link: MediaLink) -> InlineKeyboardMarkup:
     ])
 
 
-async def send_media(
+def media_caption(row) -> str:
+    link = _row_link(row)
+    caption = f'<a href="{html.escape(link.url, quote=True)}">{link.label}</a>'
+    if row["author"]:
+        caption += f" · @{html.escape(row['author'])}"
+    return caption
+
+
+def extract_file(message: Message) -> Optional[Tuple[str, str]]:
+    """Достаёт file_id из отправленного сообщения. Telegram может превратить
+    короткое беззвучное видео в animation — учитываем это."""
+    if message.video:
+        return message.video.file_id, "video"
+    if message.animation:
+        return message.animation.file_id, "animation"
+    if message.photo:
+        return message.photo[-1].file_id, "photo"
+    if message.document:
+        return message.document.file_id, "document"
+    return None
+
+
+async def _send(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
     thread_id: Optional[int],
-    link: MediaLink,
-    result: DownloadResult,
-) -> Optional[str]:
-    """Отправляет файл в чат. Возвращает текст ошибки или None при успехе."""
+    file_type: Optional[str],
+    media: Any,
+    row,
+) -> Message:
+    """Отправляет медиа (файл или file_id) с подписью и кнопками."""
     kwargs: Dict[str, Any] = {
         "chat_id": chat_id,
-        "caption": f'<a href="{html.escape(link.url, quote=True)}">{link.label}</a>',
+        "caption": media_caption(row),
         "parse_mode": ParseMode.HTML,
-        "reply_markup": _comment_keyboard(result.caption),
+        "reply_markup": media_keyboard(row["id"], bool(row["caption"])),
         "read_timeout": 120,
         "write_timeout": 120,
     }
     if thread_id is not None:
         kwargs["message_thread_id"] = thread_id
 
+    if file_type == "photo":
+        return await context.bot.send_photo(photo=media, **kwargs)
+    if file_type == "animation":
+        return await context.bot.send_animation(animation=media, **kwargs)
+    if file_type == "document":
+        return await context.bot.send_document(document=media, **kwargs)
+    return await context.bot.send_video(video=media, supports_streaming=True, **kwargs)
+
+
+async def send_cached(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, thread_id: Optional[int], row
+) -> Optional[Message]:
+    """Мгновенная отправка по file_id — без скачивания. None, если file_id не сработал."""
+    try:
+        return await _send(context, chat_id, thread_id, row["file_type"], row["file_id"], row)
+    except BadRequest as e:
+        logger.warning(f"file_id для {row['url']} не сработал, скачаем заново: {e}")
+        storage.forget_file_id(row["id"])
+        return None
+
+
+async def upload_media(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    thread_id: Optional[int],
+    row,
+    result: DownloadResult,
+) -> Tuple[Optional[Message], Optional[str]]:
+    """Загружает файл в Telegram. Возвращает (сообщение, текст ошибки)."""
     try:
         with open(result.file_path, "rb") as media_file:
-            if result.file_type == "photo":
-                await context.bot.send_photo(photo=media_file, **kwargs)
-            else:
-                await context.bot.send_video(video=media_file, supports_streaming=True, **kwargs)
-        return None
+            return await _send(context, chat_id, thread_id, result.file_type, media_file, row), None
     except FileNotFoundError:
         logger.error(f"Файл не найден при отправке: {result.file_path}")
-        return "⚠️ Файл не найден. Попробуйте ещё раз."
+        return None, "⚠️ Файл не найден. Попробуйте ещё раз."
     except TimedOut as e:
         size_mb = os.path.getsize(result.file_path) / (1024 * 1024) if os.path.exists(result.file_path) else 0
         logger.error(f"Таймаут при отправке файла ({size_mb:.1f} MB): {e}")
-        return (
+        return None, (
             "⏱️ <b>Превышено время отправки файла</b>\n\n"
             f"Размер файла: {size_mb:.1f} MB\n"
             "Возможно, медленное соединение или временные проблемы Telegram API."
         )
     except Exception as e:
         logger.error(f"Ошибка при отправке файла: {e}")
-        return f"⚠️ Ошибка при отправке файла: {html.escape(str(e))}"
+        return None, f"⚠️ Ошибка при отправке файла: {html.escape(str(e))}"
 
 
 async def report_failure(
@@ -601,19 +619,40 @@ def _download_failed_text(link: MediaLink) -> str:
     )
 
 
+def _record_success(
+    media_id: int, sent: Message, chat_id: int, user_id: Optional[int], chat_type: Optional[str], source: str
+) -> None:
+    storage.incr("success")
+    storage.incr(f"source_{source}")
+    storage.record_delivery(media_id, chat_id, user_id, chat_type, sent.message_id, source)
+
+
 async def process_link(
     context: ContextTypes.DEFAULT_TYPE,
     link: MediaLink,
     chat_id: int,
     thread_id: Optional[int],
     status_message: Optional[Message],
+    user_id: Optional[int] = None,
+    chat_type: Optional[str] = None,
 ) -> bool:
-    """Полный цикл: скачать → отправить → убрать за собой. Возвращает True при успехе."""
-    stats['total_downloads'] += 1
-    result = await fetch_media(link, status_message)
+    """Полный цикл: кэш file_id → скачать → отправить → запомнить. True при успехе."""
+    storage.incr("total")
 
+    # 1. Уже отправляли этот ролик — пересылаем мгновенно по file_id
+    cached = storage.get_media_by_url(link.url)
+    if cached and cached["file_id"]:
+        sent = await send_cached(context, chat_id, thread_id, cached)
+        if sent:
+            logger.info(f"Отправлено из кэша file_id: {link.url}")
+            _record_success(cached["id"], sent, chat_id, user_id, chat_type, "cache")
+            await safe_delete(status_message)
+            return True
+
+    # 2. Скачиваем
+    result = await fetch_media(link, status_message)
     if not result.file_path:
-        stats['failed_downloads'] += 1
+        storage.incr("failed")
         if result.error == "too_large":
             await report_failure(
                 context, chat_id, thread_id, status_message, link,
@@ -624,29 +663,94 @@ async def process_link(
             await report_failure(context, chat_id, thread_id, status_message, link, _download_failed_text(link))
         return False
 
+    # 3. Отправляем и запоминаем file_id; файл с диска удаляем
+    final_link = result.link or link  # share-ссылка после раскрытия
+    media_id = storage.save_media(
+        final_link.url, final_link.platform, final_link.kind, result.caption, result.author
+    )
+    row = storage.get_media(media_id)
+
     await safe_edit(status_message, "📤 Отправляю...")
     try:
-        send_error = await send_media(context, chat_id, thread_id, link, result)
+        sent, send_error = await upload_media(context, chat_id, thread_id, row, result)
     finally:
         if DELETE_AFTER_SEND:
             _remove_file(result.file_path)
-        else:
-            add_to_file_cache(link.url, result.file_path)
 
-    if send_error:
-        stats['failed_downloads'] += 1
-        await report_failure(context, chat_id, thread_id, status_message, link, send_error)
+    if send_error or sent is None:
+        storage.incr("failed")
+        await report_failure(
+            context, chat_id, thread_id, status_message, link, send_error or "⚠️ Не удалось отправить файл."
+        )
         return False
 
-    stats['successful_downloads'] += 1
-    if result.source in ("ytdlp", "apify"):
-        stats[f"{result.source}_downloads"] += 1
+    file_info = extract_file(sent)
+    if file_info:
+        storage.set_file_id(media_id, *file_info)
+    _record_success(media_id, sent, chat_id, user_id, chat_type, result.source or "unknown")
     await safe_delete(status_message)
     return True
 
 
-def _thread_id(message: Message) -> Optional[int]:
-    return message.message_thread_id if message.is_topic_message else None
+# ---------------------------------------------------------------------------
+# Избранное
+# ---------------------------------------------------------------------------
+
+def _caption_snippet(caption: Optional[str], limit: int = 60) -> str:
+    if not caption:
+        return ""
+    first_line = caption.strip().splitlines()[0]
+    return first_line if len(first_line) <= limit else first_line[:limit].rstrip() + "…"
+
+
+def render_saved(user_id: int, query: Optional[str], offset: int = 0) -> Tuple[str, Optional[InlineKeyboardMarkup]]:
+    rows, total = storage.list_favorites(user_id, query, SAVED_PAGE_SIZE, offset)
+    if total == 0:
+        if query:
+            return f"🔍 По запросу «{html.escape(query)}» в избранном ничего нет.", None
+        return (
+            "⭐ Избранное пока пусто.\n\n"
+            "Нажмите «⭐ В избранное» под любым видео — оно сохранится здесь навсегда.",
+            None,
+        )
+
+    title = "⭐ <b>Избранное</b>"
+    if query:
+        title += f" — поиск «{html.escape(query)}»"
+    lines = [f"{title} ({total})\n"]
+    number_buttons = []
+    for number, row in enumerate(rows, start=offset + 1):
+        author = f" · @{html.escape(row['author'])}" if row["author"] else ""
+        line = f"<b>{number}.</b> {_row_link(row).label}{author}"
+        snippet = _caption_snippet(row["caption"])
+        if snippet:
+            line += f"\n      {html.escape(snippet)}"
+        lines.append(line)
+        number_buttons.append(InlineKeyboardButton(str(number), callback_data=f"{SEND_SAVED_PREFIX}{row['id']}"))
+
+    keyboard = [number_buttons[i:i + 5] for i in range(0, len(number_buttons), 5)]
+    navigation = []
+    if offset > 0:
+        navigation.append(InlineKeyboardButton("◀️ Назад", callback_data=f"{SAVED_PAGE_PREFIX}{max(0, offset - SAVED_PAGE_SIZE)}"))
+    if offset + SAVED_PAGE_SIZE < total:
+        navigation.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"{SAVED_PAGE_PREFIX}{offset + SAVED_PAGE_SIZE}"))
+    if navigation:
+        keyboard.append(navigation)
+
+    lines.append("\nНажмите номер, чтобы получить видео. Поиск: <code>/saved слово</code>")
+    return "\n".join(lines), InlineKeyboardMarkup(keyboard)
+
+
+async def saved_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user:
+        return
+    query = " ".join(context.args or []).strip() or None
+    context.user_data["saved_query"] = query
+    text, keyboard = render_saved(user.id, query)
+    await update.effective_message.reply_text(
+        text, parse_mode=ParseMode.HTML, reply_markup=keyboard, disable_web_page_preview=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -667,7 +771,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📌 <b>Как пользоваться:</b>\n"
         "Просто отправьте мне ссылку — можно прямо в тексте сообщения.\n\n"
         "🔧 <b>Команды:</b>\n"
-        "/start — начать работу\n"
+        "/saved — ⭐ избранное и поиск по нему\n"
         "/help — справка\n\n"
         f"ℹ️ Версия: <b>{BOT_VERSION}</b> ({RELEASE_DATE})"
     )
@@ -681,8 +785,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Как скачать:</b>\n"
         "1. Нажмите «Поделиться» → «Копировать ссылку»\n"
         "2. Отправьте ссылку мне\n\n"
-        "<b>Подпись к посту:</b>\n"
-        "Если у поста есть подпись, появится кнопка «Показать комментарий».\n\n"
+        "<b>Кнопки под видео:</b>\n"
+        "• 💬 Подпись — текст поста\n"
+        "• ⭐ В избранное — сохранить в личную коллекцию (повторное нажатие убирает)\n\n"
+        "<b>Избранное:</b>\n"
+        "• /saved — список сохранённого\n"
+        "• /saved рецепт — поиск по подписи, автору или платформе\n\n"
         "<b>Ограничения:</b>\n"
         f"• Максимум {MAX_REQUESTS_PER_MINUTE} запросов в минуту\n"
         "• Файлы до 50 МБ (лимит Telegram)\n"
@@ -698,19 +806,27 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if ADMIN_IDS and (not user or user.id not in ADMIN_IDS):
         return
 
-    total = stats['total_downloads']
-    success_rate = (stats['successful_downloads'] / total * 100) if total else 0
+    counters = storage.counters()
+    total = counters.get("total", 0)
+    success = counters.get("success", 0)
+    success_rate = (success / total * 100) if total else 0
     stats_text = (
-        "📊 <b>Статистика бота</b> (с момента запуска)\n\n"
+        "📊 <b>Статистика бота</b> (за всё время)\n\n"
         f"📥 Всего запросов: {total}\n"
-        f"✅ Успешно: {stats['successful_downloads']}\n"
-        f"❌ Ошибок: {stats['failed_downloads']}\n"
-        f"🆓 Через yt-dlp: {stats['ytdlp_downloads']}\n"
-        f"💳 Через Apify: {stats['apify_downloads']}\n"
-        f"👥 Уникальных пользователей: {len(stats['users'])}\n\n"
+        f"✅ Успешно: {success}\n"
+        f"❌ Ошибок: {counters.get('failed', 0)}\n\n"
+        f"⚡ Из кэша (мгновенно): {counters.get('source_cache', 0)}\n"
+        f"🆓 Через yt-dlp: {counters.get('source_ytdlp', 0)}\n"
+        f"💳 Через Apify: {counters.get('source_apify', 0)}\n\n"
+        f"👥 Пользователей: {storage.user_count()}\n"
         f"🎯 Процент успеха: {success_rate:.1f}%"
     )
     await update.effective_message.reply_text(stats_text, parse_mode=ParseMode.HTML)
+
+
+def _parse_id(data: str, prefix: str) -> Optional[int]:
+    value = data[len(prefix):]
+    return int(value) if value.isdigit() else None
 
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -719,13 +835,51 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Получен callback: {callback_data}")
 
     if callback_data.startswith(SHOW_COMMENT_PREFIX):
-        comment_text = COMMENTS_CACHE.get(callback_data[len(SHOW_COMMENT_PREFIX):])
-        if comment_text is None:
-            await query.answer("Комментарий больше недоступен (бот перезапускался).", show_alert=True)
+        media_id = _parse_id(callback_data, SHOW_COMMENT_PREFIX)
+        row = storage.get_media(media_id) if media_id is not None else None
+        if not row or not row["caption"]:
+            await query.answer("Подпись недоступна.", show_alert=True)
             return
+        caption = row["caption"]
         # Лимит текста alert в Telegram — 200 символов
-        shown = comment_text if len(comment_text) <= 195 else comment_text[:195] + "..."
+        shown = caption if len(caption) <= 195 else caption[:195] + "..."
         await query.answer(f"💬 {shown}", show_alert=True)
+        return
+
+    if callback_data.startswith(FAVORITE_PREFIX):
+        media_id = _parse_id(callback_data, FAVORITE_PREFIX)
+        user = query.from_user
+        if media_id is None or not user or not storage.get_media(media_id):
+            await query.answer("Видео не найдено.", show_alert=True)
+            return
+        if storage.toggle_favorite(user.id, media_id):
+            await query.answer("⭐ Добавлено в избранное. Список: /saved")
+        else:
+            await query.answer("Убрано из избранного")
+        return
+
+    if callback_data.startswith(SEND_SAVED_PREFIX):
+        media_id = _parse_id(callback_data, SEND_SAVED_PREFIX)
+        row = storage.get_media(media_id) if media_id is not None else None
+        if not row or not row["file_id"]:
+            await query.answer("Видео недоступно — пришлите ссылку заново.", show_alert=True)
+            return
+        await query.answer()
+        message = query.message if isinstance(query.message, Message) else None
+        chat_id = message.chat_id if message else query.from_user.id
+        if not await send_cached(context, chat_id, _thread_id(message), row):
+            await query.answer("Не удалось отправить — пришлите ссылку заново.", show_alert=True)
+        return
+
+    if callback_data.startswith(SAVED_PAGE_PREFIX):
+        offset = _parse_id(callback_data, SAVED_PAGE_PREFIX) or 0
+        await query.answer()
+        text, keyboard = render_saved(query.from_user.id, context.user_data.get("saved_query"), offset)
+        if isinstance(query.message, Message):
+            await safe_edit(
+                query.message, text, parse_mode=ParseMode.HTML, reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
         return
 
     if callback_data.startswith(RETRY_DOWNLOAD_PREFIX):
@@ -747,7 +901,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not isinstance(status_message, Message):
             return
         await safe_edit(status_message, "⏳ Скачиваю...", reply_markup=None)
-        await process_link(context, link, status_message.chat_id, _thread_id(status_message), status_message)
+        await process_link(
+            context, link, status_message.chat_id, _thread_id(status_message), status_message,
+            user_id=user.id if user else None, chat_type=status_message.chat.type,
+        )
         return
 
     await query.answer()
@@ -778,7 +935,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user:
-        stats['users'].add(user.id)
+        storage.touch_user(user.id)
         if not check_rate_limit(user.id):
             await message.reply_text(
                 "⏰ Слишком много запросов!\n\n"
@@ -794,14 +951,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Не удалось отправить статусное сообщение: {e}")
         status_message = None
 
-    await process_link(context, link, message.chat_id, _thread_id(message), status_message)
+    await process_link(
+        context, link, message.chat_id, _thread_id(message), status_message,
+        user_id=user.id if user else None, chat_type=message.chat.type,
+    )
 
     # Удаляем исходное сообщение со ссылкой — результат (или ошибка со ссылкой) уже в чате
     await safe_delete(message)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.error("Необработанная ошибка при обработке апдейта", exc_info=context.error)
+    error = context.error
+    if isinstance(error, Conflict):
+        logger.warning(
+            "Conflict: этим токеном пользуется другой запущенный экземпляр бота — остановите лишний"
+        )
+    elif isinstance(error, NetworkError):  # включает TimedOut
+        logger.warning(f"Сетевая ошибка Telegram (повторится автоматически): {error}")
+    else:
+        logger.error("Необработанная ошибка при обработке апдейта", exc_info=error)
+
+
+async def post_init(app: Application) -> None:
+    try:
+        await app.bot.set_my_commands([
+            BotCommand("saved", "⭐ Избранное и поиск"),
+            BotCommand("help", "Справка"),
+            BotCommand("start", "Начать"),
+        ])
+    except Exception as e:
+        logger.warning(f"Не удалось установить меню команд: {e}")
 
 
 def build_application() -> Application:
@@ -809,11 +988,13 @@ def build_application() -> Application:
         Application.builder()
         .token(TELEGRAM_BOT_TOKEN)
         .concurrent_updates(True)  # пользователи не ждут друг друга
+        .post_init(post_init)
         .build()
     )
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("saved", saved_command))
     app.add_handler(CallbackQueryHandler(button_callback))
     # Только новые сообщения: на отредактированных update.message == None
     app.add_handler(MessageHandler(

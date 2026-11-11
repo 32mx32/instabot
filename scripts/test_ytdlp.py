@@ -41,9 +41,9 @@ def main() -> int:
                 continue
             started = time.time()
             try:
-                path, file_type, caption = download_with_ytdlp(link.url, folder, cookies)
+                path, file_type, _caption, author = download_with_ytdlp(link.url, folder, cookies)
                 size_mb = os.path.getsize(path) / 1024 / 1024
-                print(f"✅ {time.time() - started:5.1f}s {size_mb:6.2f} MB {file_type:5} {link.url}")
+                print(f"✅ {time.time() - started:5.1f}s {size_mb:6.2f} MB {file_type:5} {link.url}  @{author or '?'}")
                 os.remove(path)
                 ok += 1
             except Exception as error:

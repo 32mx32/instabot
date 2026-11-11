@@ -81,6 +81,23 @@ def _pick_downloaded_path(info: dict) -> Optional[str]:
     return None
 
 
+def _first_entry(info: dict) -> dict:
+    if info.get("_type") == "playlist":
+        entries = [entry for entry in info.get("entries") or [] if entry]
+        return entries[0] if entries else info
+    return info
+
+
+def _pick_author(info: dict) -> Optional[str]:
+    entry = _first_entry(info)
+    for source in (entry, info):
+        for key in ("uploader_id", "uploader", "channel", "creator"):
+            value = source.get(key)
+            if value and isinstance(value, str):
+                return value.strip().lstrip("@") or None
+    return None
+
+
 def _pick_caption(info: dict) -> Optional[str]:
     if info.get("_type") == "playlist":
         entries = [entry for entry in info.get("entries") or [] if entry]
@@ -94,8 +111,8 @@ def download_with_ytdlp(
     url: str,
     folder: str = "instagram_downloads",
     cookies_file: Optional[str] = None,
-) -> Tuple[str, str, Optional[str]]:
-    """Скачивает видео. Возвращает (file_path, file_type, caption) или бросает YtDlpError."""
+) -> Tuple[str, str, Optional[str], Optional[str]]:
+    """Скачивает видео. Возвращает (file_path, file_type, caption, author) или бросает YtDlpError."""
     os.makedirs(folder, exist_ok=True)
     options = _build_options(folder, cookies_file)
 
@@ -116,4 +133,4 @@ def download_with_ytdlp(
         raise YtDlpError("yt-dlp не скачал файл (возможно, он больше 50 МБ)")
 
     file_type = "video" if file_path.lower().endswith(VIDEO_EXTENSIONS) else "photo"
-    return file_path, file_type, _pick_caption(info)
+    return file_path, file_type, _pick_caption(info), _pick_author(info)

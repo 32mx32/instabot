@@ -109,6 +109,9 @@ APIFY_API_KEY = APIFY_API_KEYS[0] if APIFY_API_KEYS else None
 # Удалять файлы после отправки (экономия места на сервере)
 DELETE_AFTER_SEND = _env_bool("DELETE_AFTER_SEND", "true")
 
+# База SQLite: кэш file_id, избранное, статистика (файлы медиа в ней не хранятся)
+DB_PATH = os.getenv("DB_PATH", "data/bot.db")
+
 # Сколько скачиваний может идти одновременно
 MAX_PARALLEL_DOWNLOADS = max(1, int(os.getenv("MAX_PARALLEL_DOWNLOADS", "3")))
 

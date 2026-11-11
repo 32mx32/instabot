@@ -31,3 +31,6 @@ bot.log
 # Логи бота и cookies для yt-dlp (секреты!)
 logs/
 cookies/
+
+# База бота
+data/
