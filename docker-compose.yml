@@ -5,7 +5,10 @@ services:
     restart: always
     volumes:
       - ./instagram_downloads:/app/instagram_downloads
+      - ./logs:/app/logs
+      # Необязательно: cookies для yt-dlp (см. YTDLP_COOKIES_FILE в .env)
+      - ./cookies:/app/cookies:ro
     environment:
       - TZ=Europe/Moscow
     env_file:
-      - .env 
+      - .env

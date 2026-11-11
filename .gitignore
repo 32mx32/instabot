@@ -27,3 +27,7 @@ Thumbs.db
 # Логи
 *.log
 bot.log
+
+# Логи бота и cookies для yt-dlp (секреты!)
+logs/
+cookies/

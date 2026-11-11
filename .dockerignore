@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+!.env.example
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+logs/
+cookies/
+instagram_downloads/*
+*.log
+.DS_Store
+REVIEW_REPORT.md
