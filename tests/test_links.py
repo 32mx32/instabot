@@ -13,6 +13,8 @@ from links import extract_link, is_instagram_stories, link_from_resolved_url
     ("https://instagram.com/tv/TV1/", "https://www.instagram.com/tv/TV1/", "tv"),
     ("смотри https://www.instagram.com/reel/ABC123/ огонь", "https://www.instagram.com/reel/ABC123/", "reel"),
     ("@https://www.instagram.com/reel/ABC123/,", "https://www.instagram.com/reel/ABC123/", "reel"),
+    ("https://www.instagram.com/reel/https://www.instagram.com/reel/Dfm9b7OCb-v/?dlrf=N3Uz/",
+     "https://www.instagram.com/reel/Dfm9b7OCb-v/", "reel"),
     ("https://www.instagram.com/share/reel/BAxyz/", "https://www.instagram.com/share/reel/BAxyz/", "share"),
     ("https://www.tiktok.com/@user/video/7300000000000000000?lang=ru", "https://www.tiktok.com/@user/video/7300000000000000000?lang=ru", "video"),
     ("глянь vm.tiktok.com/ZMabc123/.", "https://vm.tiktok.com/ZMabc123/", "video"),

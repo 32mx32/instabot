@@ -11,7 +11,9 @@ _TRAILING_PUNCTUATION = ".,;:!?)]}>»\"'"
 _INSTAGRAM_RE = re.compile(
     r"(?:https?://)?(?:www\.|m\.)?(?:instagram\.com|instagr\.am)/"
     r"(?:[A-Za-z0-9_.]+/)?"          # необязательный username: instagram.com/<user>/reel/...
-    r"(reels?|p|tv)/([A-Za-z0-9_-]+)",
+    # ID не может продолжаться символами ID или «:» — иначе в склеенной
+    # «.../reel/https://instagram.com/reel/ID» ID-ом стал бы «https»
+    r"(reels?|p|tv)/([A-Za-z0-9_-]+)(?![A-Za-z0-9_-]|:)",
     re.IGNORECASE,
 )
 _INSTAGRAM_SHARE_RE = re.compile(
